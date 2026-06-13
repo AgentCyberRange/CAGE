@@ -1,0 +1,33 @@
+# Repo-local Cage configuration.
+#
+# `config/models.yml` is intentionally local and ignored by git. Start from:
+#
+#   cp config/models.example.yml config/models.yml
+#
+# Then edit API keys, auth_source paths, and any lab-local endpoints there.
+models_file: config/models.yml
+
+# Defaults for `cage inspect` and the managed inspector board started by
+# `cage run` when project logging.inspect_mode is `auto` or `on`.
+web_inspector:
+  # Bind to all interfaces by default so remote worktrees and shared dev boxes
+  # can open the inspector without extra flags.
+  host: 0.0.0.0
+  port: 7777
+  open_browser: true
+
+  ui:
+    run_filters_open: true
+    trial_filters_open: true
+    default_min_run_duration_ms: 0
+    default_min_trial_duration_ms: 0
+
+  board:
+    enabled: true
+    auto_start_on_run: true
+
+  auth:
+    enabled: false
+    # Optional. Used only when auth.enabled is true. Environment expansion is supported:
+    # token: ${CAGE_INSPECTOR_TOKEN}
+    token: ""

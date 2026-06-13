@@ -1,0 +1,18 @@
+{
+  "name": "cage-plugins",
+  "owner": {
+    "name": "cage",
+    "email": "cage@local"
+  },
+  "plugins": [
+    {
+      "name": "openviking-memory",
+      "source": "./plugins/openviking-memory",
+      "description": "Long-term semantic memory powered by OpenViking",
+      "version": "0.1.2",
+      "author": {
+        "name": "OpenViking"
+      }
+    }
+  ]
+}

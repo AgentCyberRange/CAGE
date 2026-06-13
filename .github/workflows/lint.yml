@@ -1,0 +1,24 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev]"
+      # Pyflakes correctness rules (undefined names, unused/duplicate imports).
+      # The wider E/I/W ruleset + mypy are a separate ratchet, tracked in
+      # docs/plans/2026-06-08-cage-structure-cleanup.md (D10 follow-on).
+      - name: Ruff (pyflakes)
+        run: ruff check --select F cage tests
+      - name: Import contracts (hexagonal dependency direction)
+        run: lint-imports

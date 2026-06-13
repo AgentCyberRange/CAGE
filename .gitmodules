@@ -1,0 +1,20 @@
+[submodule "examples/autopenbench/datasets"]
+	path = examples/autopenbench/datasets
+	url = https://github.com/AgentCyberRange/AutoPenbench.git
+	branch = main
+[submodule "examples/cvebench/datasets"]
+	path = examples/cvebench/datasets
+	url = https://github.com/AgentCyberRange/CVE-Bench.git
+	branch = main
+[submodule "examples/nyu/datasets"]
+	path = examples/nyuctfbench/datasets
+	url = https://github.com/AgentCyberRange/NYUCTF-Bench.git
+	branch = main
+[submodule "examples/agent_pentest_bench/datasets/post_exploit_bench"]
+	path = examples/agent_pentest_bench/datasets/post_exploit_bench
+	url = https://github.com/AgentCyberRange/PostExploitBench.git
+	branch = main
+[submodule "examples/agent_pentest_bench/datasets/web_exploit_bench"]
+	path = examples/agent_pentest_bench/datasets/web_exploit_bench
+	url = https://github.com/AgentCyberRange/WebExploitBench.git
+	branch = main

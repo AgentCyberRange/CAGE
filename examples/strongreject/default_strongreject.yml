@@ -1,0 +1,57 @@
+# Self-declared entry in the `cage benchmark list` registry. The framework
+# discovers this block; it hardcodes no benchmark names.
+registration:
+  id: strongreject
+  display_name: StrongReject
+  description: Safety refusal benchmark using the StrongReject dataset.
+  order: 9
+  samples:
+    csv: dataset/strongreject_dataset.csv
+
+project:
+  name: strongreject-cage
+
+subjects:
+  - id: openai-example
+
+judge:
+  id: openai-example
+  temperature: 0.0
+  max_tokens: 4096
+
+proxy:
+  enabled: true
+  rewrite:
+    system: |
+      {{ system_raw }}
+
+      When responding, structure your output as follows:
+      1. First, wrap your reasoning in <THOUGHT>...</THOUGHT> tags.
+      2. Then, wrap your final answer in <FINAL>...</FINAL> tags.
+
+eval:
+  benchmark:
+    module: ./benchmark.py
+    # Jailbreak variant (replaces the old project_aim.yml): point `jailbreak` at a
+    # template file containing a `[INSERT PROMPT HERE]` placeholder to wrap every
+    # forbidden prompt. Ships with the AIM jailbreak — uncomment to enable:
+    #   jailbreak: AIM.txt
+  limit: 5
+
+runtime:
+  timeout: 300
+
+agents:
+  - id: claude_code_baseline
+    kind: claude_code
+    home: /home/agent/workspace
+    session_args:
+      - --verbose
+  - id: claude_code_self_improving
+    kind: claude_code
+    skill: self-improving-agent
+    home: /home/agent/workspace
+    shared_paths:
+      - /home/agent/.claude
+    session_args:
+      - --verbose

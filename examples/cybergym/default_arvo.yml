@@ -1,0 +1,118 @@
+# Self-declared entry in the `cage benchmark list` registry. The framework
+# discovers this block; it hardcodes no benchmark names.
+registration:
+  id: arvo
+  display_name: ARVO (external)
+  description: Same-kind ARVO reproduction tasks not in the CyberGym benchmark.
+  order: 6
+  samples:
+    index: arvo.json
+
+project:
+  # Appears in run artifacts and the web inspector.
+  name: cybergym-arvo-external
+
+proxy:
+  enabled: true
+  request_timeout: 3600
+  # upstream_http_proxy: http://172.17.0.1:7890
+
+output:
+  dashboard_prompt: false
+  dashboard_output: false
+  dashboard_reasoning: false
+  csv_prompt: false
+  csv_output: false
+  csv_reasoning: false
+
+logging:
+  inspect_mode: auto
+
+eval:
+  benchmark:
+    module: ./benchmark.py
+    class: CyberGymBenchmark
+    # Task catalog: same-kind ARVO tasks that are NOT part of the CyberGym
+    # benchmark ("arvo-external", 3480 tasks). Built by globbing the payload
+    # tree with scripts/build_cybergym_index.py from-data-dir.
+    benchmark_root: ./datasets
+    index_file: arvo.json
+    # External payloads + their grading-image cache (both materialised by the
+    # arvo-external run).
+    data_dir: /path/to/arvo/data
+    image_cache_dir: /path/to/arvo/image-cache
+    # --- Grading backend: image mode (default) vs binary mode ---------------
+    # Leave binary_dir UNSET to grade against the per-task n132/arvo images
+    # (uses image_cache_dir / image_cache below). SET binary_dir to grade
+    # against prebuilt vul/fix binaries instead (~130 GB on disk vs ~10 TB of
+    # images; a small pre-pulled cybergym/oss-fuzz-base-runner runs them). When
+    # set, image_cache_dir / image_cache are ignored. Agent task is identical.
+    # NOTE: the prebuilt-binary set only covers the CyberGym tasks (1368 arvo +
+    # 139 oss-fuzz), NOT the 3480-task arvo-external catalog — so most external
+    # tasks have no binaries and image mode is the right default here.
+    # binary_dir: ./datasets/server-binary
+    difficulty: level2
+    # The whole 3480-task catalog runs by default (images are cached for them).
+    # Subset from the CLI with `--sample arvo_10012 ...` or cap with eval.limit.
+    grading:
+      enabled: true
+    image_cache:
+      # Keep the CyberGym benchmark "first 100" permanently loaded even during
+      # arvo runs — these are never evicted.
+      pinned_task_ids: ./datasets/cybergym_images.txt
+      # The 3480 external tasks are huge (8.4TB of tars). Load on demand and
+      # LRU-evict so docker's filesystem stays under this budget. Tune to taste.
+      max_evictable_gb: 500
+      evict: true
+      # Storage-safety floor (GB). Before loading any grading image we ensure at
+      # least this much free space on the docker filesystem; if a load would
+      # breach it we evict non-pinned images first, and abort the run if free
+      # space still cannot be raised above the floor. Prevents the disk-full
+      # corruption that bricks images. Resolution is offline only: local docker
+      # -> local tar cache -> fail (never a registry pull).
+      min_free_gb: 50
+      # Warm a trial's grading images in the background at trial start so the
+      # multi-GB docker load is hidden behind the agent's runtime.
+      preload: true
+  limit: null
+
+target:
+  enabled: false
+
+runtime:
+  timeout: 3600
+  # max_trials_global omitted -> unlimited (cap concurrency per agent with max_concurrent)
+  passk: 1
+  max_rounds: -1
+  max_input_tokens: null
+  max_output_tokens: null
+  max_cost: null
+  agent_network_mode: bridge
+  store_proxy: true
+  live_check:
+    enabled: false
+
+agents:
+  - id: claude_code
+    kind: claude_code
+    models:
+      - id: glm-5.1
+        sources: [glm-5.1-w4a8, glm-5.1-w4a8-4maas]
+        extra_env:
+          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
+          DISABLE_INTERLEAVED_THINKING: "1"
+    image: pursu1ng/cage-images:claude-code-latest
+    home: /home/agent/workspace
+    # Concurrency: how many trials this agent runs AT ONCE (not a total cap).
+    # Override at the CLI with --max-concurrent N.
+    max_concurrent: 3
+    session_args:
+      - --permission-mode
+      - bypassPermissions
+      - --verbose
+      # Align with the upstream CyberGym claude_code runner's "no web tools"
+      # setting (examples/agents/claude_code/run.py: disallowed_tools =
+      # "WebFetch,WebSearch"). The PoC must come from the agent's own analysis,
+      # not from looking the CVE up on the web.
+      - --disallowedTools
+      - WebFetch,WebSearch

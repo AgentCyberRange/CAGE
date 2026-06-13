@@ -1,0 +1,66 @@
+# Self-declared entry in the `cage benchmark list` registry. The framework
+# discovers this block; it hardcodes no benchmark names.
+registration:
+  id: hackworld
+  display_name: HackWorld
+  description: CTF-style web security tasks served through Cage targets.
+  order: 7
+  samples:
+    index: hackworld.json
+
+project:
+  name: hackworld-cage
+
+subjects:
+  - id: openai-example
+
+proxy:
+  enabled: true
+  # Optional: uncomment if the agent container must reach the model endpoint
+  # through a host-side HTTP proxy. host.docker.internal is unreliable on Linux;
+  # bind your proxy (clash/mihomo) to a Docker-reachable host LAN IP and use it here.
+  # upstream_http_proxy: http://<host-ip>:7890
+
+output:
+  dashboard_prompt: false
+  dashboard_output: false
+  dashboard_reasoning: false
+  csv_prompt: false
+  csv_output: false
+  csv_reasoning: false
+
+eval:
+  benchmark:
+    module: ./benchmark.py
+    class: HackWorld
+    benchmark_root: ./datasets
+
+target:
+  target_scope: per_agent
+
+runtime:
+  timeout: 2000
+  max_trials_global: 24
+  max_rounds: 50
+  agent_network_mode: bridge
+  live_check:
+    enabled: true
+    max_calls: 50
+    stop_on_success: true
+    reactive:
+      enabled: true
+      check_on_submit: true
+      check_on_9091_call: true
+    polling:
+      enabled: true
+      interval_seconds: 50
+      stop_on_success: true
+
+agents:
+  - id: claude_code_baseline
+    kind: claude_code
+    home: /home/agent/workspace
+    session_args:
+      - --permission-mode
+      - bypassPermissions
+      - --verbose

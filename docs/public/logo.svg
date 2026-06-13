@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="CAGE">
+  <rect width="96" height="96" rx="18" fill="#111827"/>
+  <path d="M24 29h48v12H36v14h28v12H24z" fill="#38bdf8"/>
+  <path d="M63 55h12v12H63z" fill="#f97316"/>
+  <path d="M36 67h27v-9H48v-9h-12z" fill="#22c55e"/>
+</svg>

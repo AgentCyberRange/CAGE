@@ -1,0 +1,69 @@
+# Self-declared entry in the `cage benchmark list` registry. The framework
+# discovers this block; it hardcodes no benchmark names.
+registration:
+  id: cvebench
+  display_name: CVEBench
+  description: CVE exploitation tasks served through Cage targets.
+  order: 4
+  samples:
+    index: cvebench.json
+
+project:
+  name: cvebench-cage
+
+subjects:
+  - id: openai-example
+
+proxy:
+  enabled: true
+  # Optional: uncomment if the agent container must reach the model endpoint
+  # through a host-side HTTP proxy. host.docker.internal is unreliable on Linux;
+  # bind your proxy (clash/mihomo) to a Docker-reachable host LAN IP and use it here.
+  # upstream_http_proxy: http://<host-ip>:7890
+
+output:
+  dashboard_prompt: false
+  dashboard_output: false
+  dashboard_reasoning: false
+  csv_prompt: false
+  csv_output: false
+  csv_reasoning: false
+
+eval:
+  benchmark:
+    module: ./benchmark.py
+    class: CVEBench
+    benchmark_root: ./datasets
+
+runtime:
+  timeout: 2000
+  max_trials_global: 24
+  max_rounds: 50
+  agent_network_mode: bridge
+  live_check:
+    enabled: true
+    max_calls: 50
+    stop_on_success: true
+    reactive:
+      enabled: true
+      check_on_submit: true
+      check_on_9091_call: true
+    polling:
+      enabled: true
+      interval_seconds: 50
+      stop_on_success: true
+      # Require ≥2 consecutive positive polls before locking a live-success
+      # verdict — defends against single-poll validator flips. CVEBench's
+      # benchmark module further escalates noisy classes (DoS, Outbound)
+      # to higher thresholds via live_check_confirm_polls(). See the
+      # 2026-05 qwen3-27b audit for the empirical motivation.
+      confirm_polls: 2
+
+agents:
+  - id: claude_code_baseline
+    kind: claude_code
+    home: /home/agent/workspace
+    session_args:
+      - --permission-mode
+      - bypassPermissions
+      - --verbose

@@ -1,0 +1,951 @@
+{% extends "base.html" %}
+{% block title %}{{ dashboard.run_id }} — Cage Inspector{% endblock %}
+
+{% block breadcrumb %}
+{% if project %}
+<span class="text-slate-600 mx-1">/</span>
+<a href="{{ url_for('inspector.benchmark_detail', project=project) }}"
+   class="text-slate-400 hover:text-white text-sm">{{ project }}</a>
+{% if model %}
+<span class="text-slate-600 mx-1">/</span>
+<a href="{{ url_for('inspector.benchmark_detail', project=project) }}"
+   class="text-slate-400 hover:text-white text-sm">{{ model }}</a>
+{% endif %}
+<span class="text-slate-600 mx-1">/</span>
+<span class="text-slate-200 text-sm font-medium">{{ dashboard.run_id }}</span>
+{% else %}
+<span class="text-slate-600 mx-1">/</span>
+<a href="/" class="text-slate-400 hover:text-white text-sm">Runs</a>
+<span class="text-slate-600 mx-1">/</span>
+<span class="text-slate-200 text-sm font-medium">{{ dashboard.run_id }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<!-- Run header -->
+<div class="bg-surface rounded-xl p-6 border border-slate-700/50 mb-6">
+  <div class="flex items-start justify-between gap-6">
+    <div>
+      <h1 class="text-xl font-bold text-white">{{ dashboard.experiment }}</h1>
+      <p class="text-slate-400 text-sm mt-1 font-mono">{{ dashboard.run_id }}</p>
+    </div>
+    <div class="flex items-start gap-4">
+      <button type="button"
+              data-copy-debug-bundle="run"
+              data-copy-debug-target="run-debug-bundle"
+              class="px-3 py-1.5 rounded-lg bg-slate-700/40 text-slate-200 text-sm hover:bg-slate-700/60">
+        Copy debug bundle
+      </button>
+      <a href="{{ dashboard_url(run_dir) }}"
+         class="px-3 py-1.5 rounded-lg bg-blue-500/15 text-blue-200 text-sm font-medium border border-blue-500/30 hover:bg-blue-500/25"
+         title="Benchmark-defined visualization for this run">
+        Dashboard
+      </a>
+      <div class="text-right text-sm text-slate-400">
+        {% set latest_run = run_history[-1] if run_history else none %}
+        <div>First run: {{ run_history[0].started_at if run_history else dashboard.started_at }}</div>
+        <div>Last run: {{ latest_run.started_at if latest_run else dashboard.started_at }}</div>
+        <div>Ended: {{ latest_run.completed_at if latest_run and latest_run.completed_at else dashboard.get('completed_at', '-') }}</div>
+      </div>
+    </div>
+  </div>
+  <script id="run-debug-bundle" type="application/json">{{ run_debug_bundle | tojson }}</script>
+
+  {% set run_overview_title = "project.yml summary" %}
+  {% set run_overview_wrapper_class = "mt-5 border-t border-slate-700/50 pt-4" %}
+  {% include "_run_overview.html" %}
+
+  {% if run_history %}
+  <details class="mt-5 border-t border-slate-700/50 pt-4">
+    <summary class="mb-3 flex flex-wrap items-center justify-between gap-3 cursor-pointer text-sm font-semibold text-slate-200">
+      <span>Run history</span>
+      <span class="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-400">
+        {{ run_history | length }} invocation{% if run_history | length != 1 %}s{% endif %}
+      </span>
+    </summary>
+    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {% for item in run_history %}
+      <div class="rounded-lg border border-slate-700/60 bg-slate-900/40 px-4 py-3">
+        <div class="flex items-center justify-between gap-3">
+          <span class="font-semibold text-slate-100">{{ item.label }}</span>
+          {% if item.is_latest %}
+          <span class="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-semibold text-blue-200">Last run</span>
+          {% endif %}
+        </div>
+        <div class="mt-3 grid gap-1 text-xs text-slate-400">
+          <div><span class="text-slate-500">Started</span> <span class="font-mono text-slate-200">{{ item.started_at or '-' }}</span></div>
+          <div><span class="text-slate-500">Ended</span> <span class="font-mono text-slate-200">{{ item.completed_at or '-' }}</span></div>
+          <div><span class="text-slate-500">Duration</span> <span class="text-slate-200">{{ item.duration_ms | fmt_duration }}</span></div>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2 text-xs">
+          {% if item.status %}
+          <span class="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-slate-300">{{ item.status }}</span>
+          {% endif %}
+          {% if item.trial_attempts %}
+          <span class="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-slate-300">{{ item.trial_attempts }} trial attempts</span>
+          {% endif %}
+          {% if item.source == 'reconstructed' %}
+          <span class="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-amber-200">Reconstructed</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+{% if preflight %}
+<details class="mb-4 rounded-xl border px-4 py-3 text-sm
+  {% if preflight.kind == 'error' %}border-red-500/30 bg-red-500/10
+  {% elif preflight.kind == 'warning' %}border-yellow-500/30 bg-yellow-500/10
+  {% else %}border-emerald-500/30 bg-emerald-500/10{% endif %}"
+  {% if preflight.kind != 'success' %}open{% endif %}>
+  <summary class="cursor-pointer font-semibold
+    {% if preflight.kind == 'error' %}text-red-200
+    {% elif preflight.kind == 'warning' %}text-yellow-200
+    {% else %}text-emerald-200{% endif %}">
+    Preflight:
+    <span>{{ preflight.passed }} PASS</span>
+    {% if preflight.failed %} · <span class="text-red-200">{{ preflight.failed }} FAIL</span>{% endif %}
+    {% if preflight.warnings %} · <span class="text-yellow-200">{{ preflight.warnings }} WARN</span>{% endif %}
+  </summary>
+  {% if preflight.details %}
+  <ul class="mt-2 space-y-0.5 font-mono text-xs text-slate-300">
+    {% for line in preflight.details %}
+    <li class="{% if line.startswith('FAIL') %}text-red-300{% elif line.startswith('WARN') %}text-yellow-300{% else %}text-slate-400{% endif %}">{{ line }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</details>
+{% endif %}
+
+<!-- Review/live status banner -->
+{% set running_count = trials | selectattr('info.running') | list | length %}
+{% set live_success_count = trials | selectattr('info.status_kind', 'equalto', 'live_success') | list | length %}
+{% set warning_count = trials | rejectattr('info.running') | selectattr('info.status_kind', 'equalto', 'warning') | list | length %}
+{% set failed_count = trials | rejectattr('info.running') | selectattr('info.status_kind', 'equalto', 'error') | list | length %}
+<div id="run-live-banner"
+     data-run-encoded-path="{{ run_dir | encode_path }}"
+     class="{% if not has_running %}hidden{% endif %} mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm">
+  <span class="inline-flex items-center gap-1.5 font-semibold text-sky-200">
+    <span class="h-2 w-2 rounded-full bg-sky-400 animate-pulse"></span>
+    <span>Live progress</span>
+  </span>
+  <span class="flex flex-wrap items-center gap-2 text-slate-300">
+    <button type="button"
+            data-audit-preset="running"
+            data-summary-filter="running"
+            class="rounded border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-200 hover:bg-sky-500/20"
+            title="Show trials that are currently running.">
+      <span data-live-counter="running">{{ running_count }}</span> Running
+    </button>
+    <button type="button"
+            data-audit-preset="target-passed"
+            data-summary-filter="target-passed"
+            class="rounded border border-green-500/25 bg-green-500/10 px-2 py-1 text-xs font-semibold text-green-200 hover:bg-green-500/20"
+            title="Show trials where the target validator reported success.">
+      <span data-live-counter="live_success">{{ live_success_count }}</span> Target passed
+    </button>
+    <span class="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200"
+          title="Trials stopped by max rounds, timeouts, tool limits, or interruption.">
+      <span data-live-counter="warnings">{{ warning_count }}</span> Stopped
+    </span>
+    <button type="button"
+            data-audit-preset="failed"
+            data-summary-filter="failed"
+            class="rounded border border-red-500/25 bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-200 hover:bg-red-500/20"
+            title="Show process, model, target, or tool failures.">
+      <span data-live-counter="failed">{{ failed_count }}</span> Failed
+    </button>
+    <span class="rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs font-semibold text-slate-300">
+      <span data-live-counter="total">{{ trials | length }}</span> Total
+    </span>
+  </span>
+  <span class="ml-auto flex items-center gap-3 text-xs text-slate-400">
+    <span id="run-new-trials-hint"
+          data-new-trials-auto-refresh-ms="8000"
+          class="hidden items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-200">
+      <span>
+        New trials available · refreshing in
+        <span data-new-trials-countdown class="font-semibold">8s</span>
+      </span>
+      <button id="run-new-trials-refresh"
+              type="button"
+              class="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-100 hover:bg-amber-500/20">
+        Refresh now
+      </button>
+      <button id="run-new-trials-pause"
+              type="button"
+              class="rounded border border-slate-600 bg-slate-900/50 px-1.5 py-0.5 text-slate-200 hover:bg-slate-800">
+        Pause auto-refresh
+      </button>
+    </span>
+    <span>last update <span id="run-live-updated">just now</span></span>
+  </span>
+</div>
+
+<!-- Trials table -->
+<div class="bg-surface rounded-xl border border-slate-700/50 overflow-hidden"
+     id="trial-filters"
+     data-default-min-duration-ms="{{ web_ui.default_min_trial_duration_ms | int }}">
+  <div class="px-6 py-4 border-b border-slate-700/50 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-white">Trials ({{ trials | length }})</h2>
+        <p id="trial-filter-summary" class="text-xs text-slate-500 mt-1">Showing all trials by default</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-500 mr-1">Quick:</span>
+        <button type="button" data-audit-preset="running"
+                class="rounded border border-sky-500/25 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/20"
+                title="Show trials that are still running.">
+          Running
+        </button>
+        <button type="button" data-audit-preset="target-passed"
+                class="rounded border border-green-500/25 bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-200 hover:bg-green-500/20"
+                title="Show trials where the target validator reported success.">
+          Target passed
+        </button>
+        <button type="button" data-audit-preset="max-rounds"
+                class="rounded border border-yellow-500/25 bg-yellow-500/10 px-3 py-1.5 text-xs font-semibold text-yellow-200 hover:bg-yellow-500/20"
+                title="Show trials that stopped at the configured round budget.">
+          Max rounds
+        </button>
+        <button type="button" data-audit-preset="timed-out"
+                class="rounded border border-yellow-500/25 bg-yellow-500/10 px-3 py-1.5 text-xs font-semibold text-yellow-200 hover:bg-yellow-500/20"
+                title="Show trials that ended because time ran out.">
+          Timed out
+        </button>
+        <button type="button" data-audit-preset="failed"
+                class="rounded border border-red-500/25 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/20"
+                title="Show model, target, tool, process, and nonzero-exit errors.">
+          Failed
+        </button>
+        <button id="trial-reset-filters"
+                type="button"
+                class="rounded border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700">
+          Reset
+        </button>
+      </div>
+    </div>
+    <p data-audit-filter-help class="max-w-5xl text-xs leading-5 text-slate-400">
+      Target passed means the target validator reported success. Max rounds means the agent stopped at the configured round budget.
+      Failed includes model, target, tool, process, and nonzero-exit errors.
+    </p>
+
+    <div class="grid gap-3 md:grid-cols-4">
+      <label class="text-xs uppercase tracking-wider text-slate-500">
+        Search
+        <input id="trial-search-filter"
+               class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200"
+               placeholder="trial id or output">
+      </label>
+      <label class="text-xs uppercase tracking-wider text-slate-500">
+        Status
+        <select id="trial-status-filter" class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200">
+          <option value="">All statuses</option>
+          {% for status in trial_status_options %}
+          <option value="{{ status }}">{{ status }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="text-xs uppercase tracking-wider text-slate-500">
+        Min duration
+        {% set default_min_trial_duration_ms = web_ui.default_min_trial_duration_ms | int %}
+        <select id="trial-duration-filter" class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200">
+          <option value="0"{% if default_min_trial_duration_ms == 0 %} selected{% endif %}>Any duration</option>
+          <option value="480000"{% if default_min_trial_duration_ms == 480000 %} selected{% endif %}>8m+</option>
+          <option value="1800000"{% if default_min_trial_duration_ms == 1800000 %} selected{% endif %}>30m+</option>
+          <option value="3600000"{% if default_min_trial_duration_ms == 3600000 %} selected{% endif %}>1h+</option>
+        </select>
+      </label>
+      <div class="text-xs uppercase tracking-wider text-slate-500">
+        Active tags
+        <div id="trial-active-tags" class="mt-1 min-h-9 rounded border border-slate-700 bg-bg px-2 py-2 text-xs normal-case tracking-normal text-slate-500">
+          none
+        </div>
+      </div>
+    </div>
+
+    {% if trial_tag_options %}
+    <div class="flex flex-wrap gap-2" id="trial-tag-filter">
+      {% for tag in trial_tag_options %}
+      <button type="button"
+              data-trial-tag-option="{{ tag }}"
+              class="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 hover:border-blue-500/50 hover:text-blue-200">
+        {{ tag }}
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700/30">
+          <th class="text-left px-6 py-3">#</th>
+          <th class="text-left px-6 py-3">Trial ID</th>
+          <th class="text-left px-6 py-3">Status</th>
+          <th class="text-left px-6 py-3">Score</th>
+          <th class="text-left px-6 py-3">Duration</th>
+          <th class="text-left px-6 py-3">Exit</th>
+          <th class="text-left px-6 py-3">Progress</th>
+          <th class="text-left px-6 py-3">Tokens</th>
+          <th class="text-left px-6 py-3 max-w-md">Output</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in trials %}
+        <tr class="border-b border-slate-700/20 hover:bg-slate-800/50 transition-colors"
+            data-trial-row
+            data-trial-id="{{ t.id }}"
+            data-duration-ms="{{ t.info.get('duration_ms', 0) }}"
+            data-status-kind="{{ t.info.get('status_kind', 'pending') }}"
+            data-status-label="{{ t.info.get('status_label', 'Pending') }}"
+            data-running="{{ 'true' if t.info.get('running') else 'false' }}"
+            data-has-artifacts="{{ 'true' if t.info.get('has_artifacts', True) else 'false' }}"
+            data-sort-index="{{ t.get('sort_index', loop.index0) }}"
+            data-tags="{{ t.info.get('tags', []) | join('||') }}"
+            data-search="{{ (t.id ~ ' ' ~ t.info.get('output', '')[:300]) | lower }}">
+          {# Row counter for the current display order. Rows render in natural
+             trial order (``data-sort-index``, the planned order), the same order
+             live polling keeps — status never reshuffles the table. #}
+          <td class="px-6 py-3 text-slate-500" data-cell="row-index"
+              {% if t.info.get('trial_index') is not none %}title="planned index: {{ t.info.trial_index }}"{% endif %}>{{ loop.index }}</td>
+          <td class="px-6 py-3">
+            {# Always a link — even interrupted/errored/pending trials have a
+               detail page (status, meta, events). Dim it when there are no
+               agent artifacts yet, but never make it unclickable. #}
+            <a data-cell-target="trial-link" href="{{ trial_url(t.dir, run_dir) }}"
+               class="font-mono text-xs {{ 'text-blue-300 hover:text-blue-200' if t.info.get('has_artifacts', True) else 'text-slate-400 hover:text-slate-200' }}"
+               {% if not t.info.get('has_artifacts', True) %}title="No agent artifacts yet — opens status, meta, and events"{% endif %}>{{ t.id }}</a>
+            {% if t.info.get('tags') %}
+            <div class="mt-1 flex max-w-sm flex-wrap gap-1">
+              {% for tag in t.info.tags[:6] %}
+              <span class="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-400">{{ tag }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
+          <td class="px-6 py-3 whitespace-nowrap" data-cell="status">
+            {% set status_kind = t.info.get('status_kind', 'pending') %}
+            <span data-cell-target="badge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-semibold
+              {% if status_kind == 'running' %}bg-sky-500/15 text-sky-300 border-sky-500/30
+              {% elif status_kind == 'success' %}bg-green-500/10 text-green-300 border-green-500/20
+              {% elif status_kind == 'live_success' %}bg-green-500/10 text-green-300 border-green-500/20
+              {% elif status_kind == 'warning' %}bg-green-500/10 text-green-300 border-green-500/20
+              {% elif status_kind == 'error' %}bg-red-500/10 text-red-300 border-red-500/20
+              {% else %}bg-slate-700/50 text-slate-300 border-slate-600{% endif %}"
+                  {% if status_kind == 'live_success' %}title="Target validator reported success. Open the trial for details."{% endif %}>
+              {% if status_kind == 'running' %}
+              <span class="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+              {% endif %}
+              <span data-cell-target="label">{{ t.info.get('status_label', 'Pending') }}</span>
+            </span>
+            <div data-cell-target="detail" class="mt-1 max-w-48 truncate text-xs text-slate-500{% if not t.info.get('status_detail') %} hidden{% endif %}" title="{{ t.info.status_detail|default('') }}">
+              {{ t.info.get('status_detail', '') }}
+            </div>
+          </td>
+          <td class="px-6 py-3">
+            {% for metric, val in t.info.get('scores', {}).items() %}
+            <span class="font-semibold
+              {% if val >= 0.7 %}text-green-400{% elif val > 0 %}text-yellow-400{% else %}text-slate-400{% endif %}">
+              {{ "%.2f"|format(val) }}
+            </span>
+            {% endfor %}
+            {% if not t.info.get('scores') %}<span class="text-slate-500">-</span>{% endif %}
+          </td>
+          <td class="px-6 py-3 text-slate-300" data-cell="duration">
+            {{ t.info.get('duration_ms', 0) | fmt_duration }}
+          </td>
+          <td class="px-6 py-3" data-cell="exit">
+            <span class="{% if t.info.get('exit_code', -1) == 0 %}text-green-400{% else %}text-yellow-400{% endif %}">
+              {{ t.info.get('exit_code', '-') }}
+            </span>
+          </td>
+          <td class="px-6 py-3 text-xs whitespace-nowrap" data-cell="progress">
+            {% set p = t.info.get('progress') %}
+            {% if p %}
+            {% set total = p.get('total_requests', 0) %}
+            {% set errors = p.get('errors', 0) %}
+            <div class="flex items-center gap-2">
+              {% if t.info.get('running') %}
+              <span data-cell-target="progress-dot" class="inline-flex h-2 w-2 rounded-full bg-sky-400 animate-pulse"></span>
+              <span data-cell-target="steps" class="text-sky-300 font-semibold">{{ total }} steps</span>
+              {% else %}
+              <span data-cell-target="steps" class="text-slate-300 font-semibold">{{ total }} steps</span>
+              {% endif %}
+            </div>
+            <div data-cell-target="errors" class="{% if errors %}text-yellow-300{% else %}text-slate-500{% endif %}">
+              {{ "%.1f"|format((errors * 100.0 / total) if total else 0) }}% errors
+            </div>
+            <div class="text-slate-500">active <span data-age-ts="{{ p.get('last_ts_ms', 0) }}" data-cell-target="age">{{ p.get('last_ts_ms', 0) | fmt_age }}</span></div>
+            {% else %}
+            <span class="text-slate-500" data-cell-target="steps">-</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-3 text-slate-400 text-xs whitespace-nowrap" data-cell="usage">
+            {% set u = t.info.get('usage', {}) %}
+            {% set cost_usd = u.get('cost_usd', 0) %}
+            {% if u.get('input_tokens') or cost_usd %}
+            <span data-cell-target="usage-text">
+              {% if u.get('input_tokens') %}{{ u.input_tokens | fmt_tokens }} in / {{ u.get('output_tokens', 0) | fmt_tokens }} out{% else %}-{% endif %}
+            </span>
+            <br><span data-cell-target="usage-reqs">{{ u.get('num_requests', 0) }} reqs</span>
+            <br><span data-cell-target="usage-cost" class="{% if not cost_usd %}hidden{% endif %}">{% if cost_usd %}${{ "%.4f"|format(cost_usd) }}{% endif %}</span>
+            {% else %}
+            <span data-cell-target="usage-text">-</span>
+            <br><span data-cell-target="usage-reqs" class="text-slate-500">0 reqs</span>
+            <br><span data-cell-target="usage-cost" class="hidden"></span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-3 align-top max-w-md" data-cell="output">
+            <p class="text-slate-300 text-xs truncate" data-cell-target="output-text">
+              {% if t.info.get('running') and t.info.get('progress') %}
+              Running · {{ t.info.progress.get('last_status', '?') }}
+              {% else %}
+              {{ t.info.get('output', '')[:150] }}
+              {% endif %}
+            </p>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const trialFilterRoot = document.getElementById('trial-filters');
+const defaultTrialMinDuration = Number(trialFilterRoot?.dataset.defaultMinDurationMs || 0);
+const trialFilters = {
+  search: document.getElementById('trial-search-filter'),
+  status: document.getElementById('trial-status-filter'),
+  duration: document.getElementById('trial-duration-filter'),
+  summary: document.getElementById('trial-filter-summary'),
+  activeTags: document.getElementById('trial-active-tags'),
+  reset: document.getElementById('trial-reset-filters'),
+};
+const selectedTrialTags = new Set();
+
+function escTrialFilterText(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderSelectedTrialTags() {
+  if (!trialFilters.activeTags) return;
+  if (!selectedTrialTags.size) {
+    trialFilters.activeTags.textContent = 'none';
+    return;
+  }
+  trialFilters.activeTags.innerHTML = Array.from(selectedTrialTags)
+    .sort()
+    .map(tag => `<span class="mr-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-200">${escTrialFilterText(tag)}</span>`)
+    .join('');
+}
+
+const AUDIT_PRESETS = {
+  running: (kind) => kind === 'running',
+  'target-passed': (kind) => kind === 'live_success',
+  'max-rounds': (kind, label) => kind === 'warning' && normalizeAuditLabel(label).includes('max rounds'),
+  'timed-out': (kind, label) => {
+    const text = normalizeAuditLabel(label);
+    return kind === 'warning' && (text.includes('timed out') || text.includes('timeout'));
+  },
+  failed: (kind) => kind === 'error',
+};
+const AUDIT_PRESET_LABELS = {
+  running: 'running',
+  'target-passed': 'target passed',
+  'max-rounds': 'max rounds',
+  'timed-out': 'timed out',
+  failed: 'failed',
+};
+let activePreset = '';
+
+function normalizeAuditLabel(label) {
+  return String(label || '').trim().toLowerCase();
+}
+
+function applyTrialFilters() {
+  const q = (trialFilters.search?.value || '').trim().toLowerCase();
+  const status = trialFilters.status?.value || '';
+  const minDuration = Number(trialFilters.duration?.value || defaultTrialMinDuration);
+  const presetPredicate = AUDIT_PRESETS[activePreset] || null;
+  let visible = 0;
+  let total = 0;
+  for (const row of document.querySelectorAll('[data-trial-row]')) {
+    total += 1;
+    const rowTags = new Set((row.dataset.tags || '').split('||').filter(Boolean));
+    const tagMatch = Array.from(selectedTrialTags).every(tag => rowTags.has(tag));
+    const duration = Number(row.dataset.durationMs || 0);
+    const kindMatch = presetPredicate
+      ? presetPredicate(row.dataset.statusKind, row.dataset.statusLabel || '')
+      : (!status || row.dataset.statusKind === status);
+    const match =
+      (!q || (row.dataset.search || '').includes(q)) &&
+      kindMatch &&
+      (row.dataset.running === 'true' || row.dataset.statusKind === 'pending' || duration >= minDuration) &&
+      tagMatch;
+    row.classList.toggle('hidden', !match);
+    if (match) {
+      visible += 1;
+      // Renumber the ``#`` cell so visible rows are 1..N contiguous,
+      // not the static template index. Idempotent — only writes when
+      // the value actually changed, to keep DOM mutations minimal.
+      const cell = row.querySelector('[data-cell="row-index"]');
+      if (cell) {
+        const v = String(visible);
+        if (cell.textContent !== v) cell.textContent = v;
+      }
+    }
+  }
+  if (trialFilters.summary) {
+    const tagText = selectedTrialTags.size ? ` · ${selectedTrialTags.size} tag filter` : '';
+    const durationText = minDuration ? ` · >=${Math.round(minDuration / 60000)}m or running` : '';
+    const presetText = activePreset
+      ? ` · preset: ${AUDIT_PRESET_LABELS[activePreset] || activePreset}`
+      : '';
+    trialFilters.summary.textContent = `Showing ${visible} / ${total} trials${presetText}${durationText}${tagText}`;
+  }
+  renderSelectedTrialTags();
+}
+
+document.querySelectorAll('[data-audit-preset]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const preset = btn.dataset.auditPreset || '';
+    activePreset = (activePreset === preset) ? '' : preset;  // toggle
+    document.querySelectorAll('[data-audit-preset]').forEach(b => {
+      b.classList.toggle('ring-2', b.dataset.auditPreset === activePreset);
+      b.classList.toggle('ring-offset-2', b.dataset.auditPreset === activePreset);
+      b.classList.toggle('ring-offset-bg', b.dataset.auditPreset === activePreset);
+    });
+    applyTrialFilters();
+  });
+});
+
+document.querySelectorAll('[data-trial-tag-option]').forEach(button => {
+  button.addEventListener('click', () => {
+    const tag = button.dataset.trialTagOption || '';
+    if (selectedTrialTags.has(tag)) {
+      selectedTrialTags.delete(tag);
+      button.classList.remove('border-blue-500', 'bg-blue-500/15', 'text-blue-200');
+    } else {
+      selectedTrialTags.add(tag);
+      button.classList.add('border-blue-500', 'bg-blue-500/15', 'text-blue-200');
+    }
+    applyTrialFilters();
+  });
+});
+
+for (const el of [trialFilters.search, trialFilters.status, trialFilters.duration]) {
+  if (!el) continue;
+  el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', applyTrialFilters);
+}
+if (trialFilters.reset) {
+  trialFilters.reset.addEventListener('click', () => {
+    if (trialFilters.search) trialFilters.search.value = '';
+    if (trialFilters.status) trialFilters.status.value = '';
+    if (trialFilters.duration) trialFilters.duration.value = String(defaultTrialMinDuration);
+    selectedTrialTags.clear();
+    activePreset = '';
+    document.querySelectorAll('[data-trial-tag-option]').forEach(button => {
+      button.classList.remove('border-blue-500', 'bg-blue-500/15', 'text-blue-200');
+    });
+    document.querySelectorAll('[data-audit-preset]').forEach(b => {
+      b.classList.remove('ring-2', 'ring-offset-2', 'ring-offset-bg');
+    });
+    applyTrialFilters();
+  });
+}
+applyTrialFilters();
+</script>
+<script>
+/* Live polling for this run page — designed to be imperceptible.
+ *
+ *  - All DOM writes are idempotent: ``setText`` / ``setClass`` no-op
+ *    if the current value already matches. ``textContent`` only mutates
+ *    when the string actually differs, so the browser doesn't repaint
+ *    the cell on every tick.
+ *  - Rows outside the viewport are stashed in a pending map and applied
+ *    only when they scroll back in (via IntersectionObserver). With 320
+ *    rows on disk only the ~20 visible rows ever touch the DOM.
+ *  - We re-run filters only after status/running/duration changes so the
+ *    table keeps matching the selected predicate during live transitions.
+ *  - No global age-ticker: "active 5s ago" updates are folded into the
+ *    poll response (the JSON carries fresh ``last_ts_ms`` already).
+ */
+(function () {
+  const banner = document.getElementById('run-live-banner');
+  if (!banner) return;
+  const encoded = banner.dataset.runEncodedPath;
+  if (!encoded) return;
+
+  const STATUS_KIND_CLASSES = {
+    running: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+    success: 'bg-green-500/10 text-green-300 border-green-500/20',
+    live_success: 'bg-green-500/10 text-green-300 border-green-500/20',
+    warning: 'bg-green-500/10 text-green-300 border-green-500/20',
+    error: 'bg-red-500/10 text-red-300 border-red-500/20',
+    pending: 'bg-slate-700/50 text-slate-300 border-slate-600',
+  };
+  const ALL_KIND_CLASSES = Object.values(STATUS_KIND_CLASSES).flatMap(c => c.split(' '));
+
+  /* ------------ idempotent low-level writes ------------- */
+
+  function setText(el, value) {
+    if (!el) return;
+    const v = String(value == null ? '' : value);
+    if (el.textContent !== v) el.textContent = v;
+  }
+
+  function setAttr(el, name, value) {
+    if (!el) return;
+    const v = String(value);
+    if (el.getAttribute(name) !== v) el.setAttribute(name, v);
+  }
+
+  function setData(el, key, value) {
+    if (!el) return;
+    const v = String(value);
+    if (el.dataset[key] !== v) el.dataset[key] = v;
+  }
+
+  function setHidden(el, hidden) {
+    if (!el) return;
+    if (el.classList.contains('hidden') !== hidden) {
+      el.classList.toggle('hidden', hidden);
+    }
+  }
+
+  function setKindClasses(badge, kind) {
+    if (!badge) return;
+    const want = (STATUS_KIND_CLASSES[kind] || STATUS_KIND_CLASSES.pending).split(' ');
+    // Skip if the badge already has exactly the desired classes.
+    let needsChange = false;
+    for (const cls of want) if (!badge.classList.contains(cls)) { needsChange = true; break; }
+    if (!needsChange) {
+      for (const cls of ALL_KIND_CLASSES) {
+        if (badge.classList.contains(cls) && !want.includes(cls)) { needsChange = true; break; }
+      }
+    }
+    if (!needsChange) return;
+    badge.classList.remove(...ALL_KIND_CLASSES);
+    badge.classList.add(...want);
+  }
+
+  /* ------------ viewport gating ------------- */
+
+  const pendingByRow = new WeakMap();   // row → most recent trial payload
+  const visibleRows = new Set();
+  const io = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        visibleRows.add(entry.target);
+        const pending = pendingByRow.get(entry.target);
+        if (pending) {
+          applyTrialDom(entry.target, pending);
+          pendingByRow.delete(entry.target);
+        }
+      } else {
+        visibleRows.delete(entry.target);
+      }
+    }
+  }, { rootMargin: '200px 0px' });  // start applying just before scrolled into view
+
+  for (const row of document.querySelectorAll('[data-trial-row]')) {
+    io.observe(row);
+  }
+
+  /* ------------ patchers ------------- */
+
+  function patchSummary(summary) {
+    if (!summary) return;
+    for (const key of ['running', 'completed', 'live_success', 'warnings', 'failed', 'total']) {
+      const el = banner.querySelector(`[data-live-counter="${key}"]`);
+      if (el && summary[key] != null) setText(el, summary[key]);
+    }
+    setHidden(banner, (summary.running || 0) <= 0 && (summary.total || 0) > 0);
+  }
+
+  function patchTrial(t) {
+    const row = document.querySelector(`[data-trial-row][data-trial-id="${CSS.escape(t.id)}"]`);
+    if (!row) return false;
+    if (visibleRows.has(row)) {
+      applyTrialDom(row, t);
+    } else {
+      // Stash for when it scrolls back in. Keeps DOM mutations out of
+      // hidden parts of the page entirely.
+      pendingByRow.set(row, t);
+    }
+    return true;
+  }
+
+  function rowSortIndex(row) {
+    const value = Number(row.dataset.sortIndex);
+    return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+  }
+
+  function updateRowNumbers(rows) {
+    rows.forEach((row, index) => {
+      const cell = row.querySelector('[data-cell="row-index"]');
+      if (cell) setText(cell, String(index + 1));
+    });
+  }
+
+  function reorderTrialRows() {
+    const rows = Array.from(document.querySelectorAll('[data-trial-row]'));
+    if (!rows.length) return;
+    const tbody = rows[0].parentElement;
+    // Natural trial order via the server-assigned sort index (the order trials
+    // were planned) — matches the server render. Running trials are NOT floated
+    // to the top, so the table keeps one stable order as trials start and finish.
+    const sortedRows = [...rows].sort((a, b) => rowSortIndex(a) - rowSortIndex(b));
+    let changed = false;
+    for (let i = 0; i < rows.length; i += 1) {
+      if (rows[i] !== sortedRows[i]) {
+        changed = true;
+        break;
+      }
+    }
+    if (changed && tbody) {
+      const fragment = document.createDocumentFragment();
+      for (const row of sortedRows) fragment.appendChild(row);
+      tbody.appendChild(fragment);
+    }
+    updateRowNumbers(sortedRows);
+  }
+
+  function applyTrialDom(row, t) {
+    setData(row, 'statusKind', t.status_kind);
+    setData(row, 'statusLabel', t.status_label || 'Pending');
+    setData(row, 'running', t.running ? 'true' : 'false');
+    setData(row, 'hasArtifacts', t.has_artifacts ? 'true' : 'false');
+    setData(row, 'durationMs', String(t.duration_ms || 0));
+
+    const trialLink = row.querySelector('[data-cell-target="trial-link"]');
+    if (trialLink && (t.url || t.encoded_path)) {
+      const href = t.url || `/trial/${t.encoded_path}`;
+      const linkClass = 'font-mono text-xs ' + (t.has_artifacts
+        ? 'text-blue-300 hover:text-blue-200'
+        : 'text-slate-400 hover:text-slate-200');
+      if (trialLink.tagName === 'A') {
+        setAttr(trialLink, 'href', href);
+        setAttr(trialLink, 'class', linkClass);
+      } else {
+        const link = document.createElement('a');
+        link.dataset.cellTarget = 'trial-link';
+        link.href = href;
+        link.className = linkClass;
+        if (!t.has_artifacts) setAttr(link, 'title', 'No agent artifacts yet — opens status, meta, and events');
+        link.textContent = trialLink.textContent;
+        trialLink.replaceWith(link);
+      }
+    }
+
+    const badge = row.querySelector('[data-cell-target="badge"]');
+    if (badge) {
+      setKindClasses(badge, t.status_kind);
+      // The pulse dot is a permanent span we just hide/show — keeps it
+      // out of the DOM-mutation path.
+      let dot = badge.querySelector('.live-pulse-dot');
+      if (t.running && !dot) {
+        dot = document.createElement('span');
+        dot.className = 'live-pulse-dot h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse';
+        badge.prepend(dot);
+      } else if (!t.running && dot) {
+        dot.remove();
+      }
+      // Surface validator-driven hints on hover.
+      if (t.audit_hint) setAttr(badge, 'title', t.audit_hint);
+    }
+    setText(row.querySelector('[data-cell-target="label"]'), t.status_label || 'Pending');
+
+    const detail = row.querySelector('[data-cell-target="detail"]');
+    if (detail) {
+      if (t.status_detail) {
+        setText(detail, t.status_detail);
+        setAttr(detail, 'title', t.status_detail);
+        setHidden(detail, false);
+      } else {
+        setHidden(detail, true);
+      }
+    }
+
+    setText(row.querySelector('[data-cell="duration"]'),
+            window.cageLive.fmtDuration(t.duration_ms));
+
+    const exitSpan = row.querySelector('[data-cell="exit"] span');
+    if (exitSpan) {
+      if (t.exit_code == null) {
+        setText(exitSpan, '-');
+      } else {
+        setText(exitSpan, String(t.exit_code));
+        const want = t.exit_code === 0 ? 'text-green-400' : 'text-yellow-400';
+        if (!exitSpan.classList.contains(want)) {
+          exitSpan.classList.remove('text-green-400', 'text-yellow-400');
+          exitSpan.classList.add(want);
+        }
+      }
+    }
+
+    if (t.progress) {
+      const stepsEl = row.querySelector('[data-cell-target="steps"]');
+      setText(stepsEl, `${t.progress.total} steps`);
+      const errorsEl = row.querySelector('[data-cell-target="errors"]');
+      if (errorsEl) {
+        const pct = t.progress.total ? (t.progress.errors * 100 / t.progress.total) : 0;
+        setText(errorsEl, `${pct.toFixed(1)}% errors`);
+        const wantCls = t.progress.errors ? 'text-yellow-300' : 'text-slate-500';
+        if (!errorsEl.classList.contains(wantCls)) {
+          errorsEl.classList.remove('text-yellow-300', 'text-slate-500');
+          errorsEl.classList.add(wantCls);
+        }
+      }
+      const ageEl = row.querySelector('[data-cell-target="age"]');
+      if (ageEl) {
+        setData(ageEl, 'ageTs', String(t.progress.last_ts_ms));
+        setText(ageEl, window.cageLive.timeAgo(t.progress.last_ts_ms, Date.now()));
+      }
+    }
+
+    if (t.usage) {
+      const ut = row.querySelector('[data-cell-target="usage-text"]');
+      if (ut) {
+        const text = t.usage.input_tokens
+          ? `${window.cageLive.fmtTokens(t.usage.input_tokens)} in / ${window.cageLive.fmtTokens(t.usage.output_tokens)} out`
+          : '-';
+        setText(ut, text);
+      }
+      setText(row.querySelector('[data-cell-target="usage-reqs"]'),
+              `${t.usage.num_requests || 0} reqs`);
+      const costEl = row.querySelector('[data-cell-target="usage-cost"]');
+      if (costEl) {
+        const cost = Number(t.usage.cost_usd || 0);
+        if (cost > 0) {
+          setText(costEl, `$${cost.toFixed(4)}`);
+          setHidden(costEl, false);
+        } else {
+          setText(costEl, '');
+          setHidden(costEl, true);
+        }
+      }
+    }
+
+    const outEl = row.querySelector('[data-cell-target="output-text"]');
+    if (outEl) {
+      const text = (t.running && t.progress && t.progress.last_status)
+        ? `Running · ${t.progress.last_status}`
+        : (t.output_preview || '').slice(0, 150);
+      setText(outEl, text);
+    }
+  }
+
+  /* ------------ header "last updated" tick ------------- */
+
+  const updatedEl = document.getElementById('run-live-updated');
+  let lastUpdate = Date.now();
+  // Update the header timestamp once every 5s — coarse enough to be
+  // invisible, frequent enough to feel "alive". It's the only thing
+  // on this page that ticks on a wall-clock schedule.
+  setInterval(() => {
+    if (!document.hidden && updatedEl) {
+      setText(updatedEl, window.cageLive.timeAgo(lastUpdate, Date.now()));
+    }
+  }, 5000);
+
+  /* ------------ poller ------------- */
+
+  let needsReload = false;
+  let unknownRowSeen = false;
+  let newTrialsReloadPaused = false;
+  let newTrialsReloadTimer = null;
+  let newTrialsCountdownTimer = null;
+  let newTrialsReloadDeadline = 0;
+  const newTrialsHint = document.getElementById('run-new-trials-hint');
+  const newTrialsCountdown = newTrialsHint?.querySelector('[data-new-trials-countdown]');
+  const newTrialsRefresh = document.getElementById('run-new-trials-refresh');
+  const newTrialsPause = document.getElementById('run-new-trials-pause');
+
+  function setNewTrialsHintVisible(visible) {
+    if (!newTrialsHint) return;
+    newTrialsHint.classList.toggle('hidden', !visible);
+    newTrialsHint.classList.toggle('inline-flex', visible);
+  }
+
+  function clearNewTrialsReloadTimers() {
+    if (newTrialsReloadTimer) {
+      clearTimeout(newTrialsReloadTimer);
+      newTrialsReloadTimer = null;
+    }
+    if (newTrialsCountdownTimer) {
+      clearInterval(newTrialsCountdownTimer);
+      newTrialsCountdownTimer = null;
+    }
+  }
+
+  function renderNewTrialsCountdown() {
+    if (!newTrialsCountdown) return;
+    if (newTrialsReloadPaused) {
+      setText(newTrialsCountdown, 'paused');
+      return;
+    }
+    const remainingMs = Math.max(0, newTrialsReloadDeadline - Date.now());
+    setText(newTrialsCountdown, `${Math.ceil(remainingMs / 1000)}s`);
+  }
+
+  function scheduleNewTrialsReload() {
+    setNewTrialsHintVisible(true);
+    if (!newTrialsHint || newTrialsReloadPaused || newTrialsReloadTimer) return;
+    const delayMs = Number(newTrialsHint.dataset.newTrialsAutoRefreshMs || 8000);
+    needsReload = true;
+    newTrialsReloadDeadline = Date.now() + delayMs;
+    renderNewTrialsCountdown();
+    newTrialsCountdownTimer = setInterval(renderNewTrialsCountdown, 250);
+    newTrialsReloadTimer = setTimeout(() => {
+      window.location.reload();
+    }, delayMs);
+  }
+
+  newTrialsRefresh?.addEventListener('click', () => {
+    window.location.reload();
+  });
+
+  newTrialsPause?.addEventListener('click', () => {
+    newTrialsReloadPaused = true;
+    needsReload = false;
+    clearNewTrialsReloadTimers();
+    renderNewTrialsCountdown();
+  });
+
+  window.cageLive.start({
+    endpoint: `/api/run/${encoded}/trials`,
+    intervalMs: 3000,
+    idleBackoffMs: 10000,
+    idleAfter: 4,
+    keepAlive: () => !needsReload,
+    onTick: (payload) => {
+      lastUpdate = Date.now();
+      patchSummary(payload.summary);
+      for (const t of payload.trials || []) {
+        if (!patchTrial(t)) {
+          unknownRowSeen = true;
+        }
+      }
+      reorderTrialRows();
+      if (typeof applyTrialFilters === 'function') applyTrialFilters();
+      if (unknownRowSeen) {
+        scheduleNewTrialsReload();
+      }
+    },
+  });
+})();
+</script>
+{% endblock %}

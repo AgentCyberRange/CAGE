@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+{% block title %}Cage Inspector - {{ project }}{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+  <div>
+    <a href="{{ url_for('inspector.index') }}" class="text-sm text-slate-400 hover:text-sky-300">&larr; Benchmarks</a>
+    <h1 class="text-2xl font-bold text-white mt-1">{{ project }}</h1>
+    <p class="mt-1 flex items-center gap-1.5 text-xs text-slate-500" title="{{ root }}/{{ project }}">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+      </svg>
+      <span class="font-mono text-slate-500">{{ root.name }}</span>
+      <span class="text-slate-600">/</span>
+      <span class="font-mono text-slate-300">{{ project }}</span>
+    </p>
+  </div>
+  {% if runs %}
+  <div class="flex flex-wrap gap-2 text-xs">
+    <span class="px-2 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+      {{ index_summary.total }} runs
+    </span>
+    <span class="px-2 py-1 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
+      <span data-running-count>{{ index_summary.running }}</span> running
+    </span>
+  </div>
+  {% endif %}
+</div>
+
+{% if not runs %}
+<div class="bg-surface rounded-xl p-8 text-center text-slate-400">
+  No runs found. Run <code class="text-blue-400">cage run &lt;project.yml&gt;</code> first.
+</div>
+{% else %}
+
+<section id="active-now" class="mb-6 rounded-lg border border-slate-700/50 bg-surface p-4">
+  <div class="mb-3 flex items-center justify-between gap-3">
+    <div>
+      <h2 class="text-lg font-semibold text-white">Active now</h2>
+      <p class="mt-1 text-sm text-slate-400">Running work is shown here before archive browsing.</p>
+    </div>
+    <span class="rounded-full border border-slate-700 bg-slate-900/70 px-2.5 py-1 text-xs text-slate-300">
+      last updated <span id="index-live-updated">just now</span>
+    </span>
+  </div>
+  {% if active_runs %}
+  <div class="grid gap-3 md:grid-cols-2">
+    {% for run in active_runs %}
+    <a href="{{ run_url(run) }}"
+       class="rounded-lg border border-sky-500/30 bg-sky-500/10 p-4 hover:border-sky-400/50"
+       data-active-run-card="{{ run.path | encode_path }}">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="truncate text-sm font-semibold text-white">{{ run.run_id }}</div>
+          <div class="mt-1 truncate text-xs text-slate-400">{{ run.project }} · {{ run.model_name or run.agent_name }}</div>
+        </div>
+        <span class="inline-flex items-center gap-1 rounded bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-200">
+          <span class="h-1.5 w-1.5 rounded-full bg-sky-300 animate-pulse"></span>Running
+        </span>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <span class="text-sky-200" data-active-run-live="steps">{{ run.live_total_requests }} steps</span>
+        <span class="text-slate-300">
+          elapsed <span data-active-run-live="elapsed">{{ run.duration_ms | fmt_duration }}</span>
+        </span>
+        <span class="text-slate-400" data-active-run-live="velocity">
+          {% if run.duration_ms and run.live_total_requests %}
+          {{ "%.1f"|format(run.live_total_requests * 60000.0 / run.duration_ms) }} steps/min
+          {% else %}-{% endif %}
+        </span>
+        <span class="{% if run.live_errors %}text-yellow-200{% else %}text-slate-300{% endif %}" data-active-run-live="errors">
+          {{ run.live_errors }} errors
+        </span>
+        <span class="text-slate-300" data-active-run-live="trials">{{ run.running_trials }} trial{% if run.running_trials != 1 %}s{% endif %}</span>
+        <span class="text-slate-400">active <span data-age-ts="{{ run.last_active_ts_ms }}" data-active-run-live="age">{{ run.last_active_ts_ms | fmt_age }}</span></span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="rounded-lg border border-slate-700/50 bg-bg/40 px-4 py-5 text-sm text-slate-400">
+    No active runs. This page still checks for new activity in the background.
+  </div>
+  {% endif %}
+</section>
+
+<details class="run-filter-panel bg-surface border border-slate-700/50 rounded-lg mb-6"{% if web_ui.run_filters_open %} open{% endif %}>
+  <summary class="px-4 py-3 text-sm font-semibold text-slate-200 cursor-pointer">
+    Filters
+    <span id="run-filter-summary" class="ml-2 text-xs font-normal text-slate-500">all runs</span>
+  </summary>
+  {% set default_min_run_duration_ms = web_ui.default_min_run_duration_ms | int %}
+  <div id="run-filters"
+       data-preserve-model-panels="true"
+       data-default-min-duration-ms="{{ default_min_run_duration_ms }}"
+       class="grid gap-3 border-t border-slate-700/40 px-4 py-4 md:grid-cols-4">
+    <label class="text-xs uppercase tracking-wider text-slate-500">
+      Agent
+      <select id="run-agent-filter" class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200">
+        <option value="">All agents</option>
+        {% for agent in run_filter_options.agents %}
+        <option value="{{ agent }}">{{ agent }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-xs uppercase tracking-wider text-slate-500">
+      Model
+      <select id="run-model-filter" class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200">
+        <option value="">All models</option>
+        {% for model in run_filter_options.models %}
+        <option value="{{ model }}">{{ model }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-xs uppercase tracking-wider text-slate-500">
+      Lifecycle
+      <select id="run-status-filter" class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200">
+        <option value="">All lifecycles</option>
+        <option value="running">Running</option>
+        <option value="completed">Finished</option>
+        <option value="interrupted">Stopped</option>
+        <option value="failed">Failed</option>
+        <option value="cancelled">Cancelled</option>
+        <option value="pending">Pending</option>
+      </select>
+    </label>
+    <label class="text-xs uppercase tracking-wider text-slate-500">
+      Min run duration
+      <select id="run-duration-filter" class="mt-1 w-full rounded border border-slate-700 bg-bg px-2 py-2 text-sm normal-case tracking-normal text-slate-200">
+        <option value="0"{% if default_min_run_duration_ms == 0 %} selected{% endif %}>Any duration</option>
+        <option value="480000"{% if default_min_run_duration_ms == 480000 %} selected{% endif %}>8m+</option>
+        <option value="1800000"{% if default_min_run_duration_ms == 1800000 %} selected{% endif %}>30m+</option>
+        <option value="3600000"{% if default_min_run_duration_ms == 3600000 %} selected{% endif %}>1h+</option>
+      </select>
+    </label>
+  </div>
+</details>
+
+<div id="runs-list" class="space-y-8">
+  {% for project_group in run_groups %}
+  <details class="run-project-group rounded-lg border border-slate-800/70 bg-slate-950/20" open data-benchmark-group="{{ project_group.project }}">
+    <summary class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer">
+      <div class="min-w-0">
+        <div class="text-xs uppercase tracking-wider text-slate-500">Benchmark</div>
+        <h2 class="text-xl font-semibold text-white truncate">{{ project_group.project }}</h2>
+      </div>
+      <div class="flex gap-2 text-xs shrink-0">
+        {% if project_group.running_count %}
+        <span class="px-2 py-1 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
+          {{ project_group.running_count }} running
+        </span>
+        {% endif %}
+        <span class="px-2 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+          {{ project_group.total_count }} total
+        </span>
+      </div>
+    </summary>
+
+    <div class="space-y-5 px-4 pb-4">
+      {% for model_group in project_group.models %}
+      <details class="run-model-panel rounded-xl border border-slate-700/60 bg-slate-900/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" data-model-panel="{{ model_group.model_name }}">
+        <summary class="mb-1 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">Model</div>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span data-model-chip="{{ model_group.model_name }}" class="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-3 py-1.5 text-left shadow-sm shadow-sky-950/30">
+                  <span class="h-2 w-2 rounded-full bg-sky-300"></span>
+                  <span class="font-mono text-sm font-semibold text-sky-50">{{ model_group.model_name }}</span>
+                </span>
+                {% if model_group.running_count %}
+                <span class="inline-flex items-center rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-300">
+                  {{ model_group.running_count }} running
+                </span>
+                {% endif %}
+                <span class="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-300">
+                  {{ model_group.total_count }} runs
+                </span>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                {% for agent_name in model_group.agents %}
+                <span class="inline-flex items-center rounded-md border border-emerald-500/20 bg-emerald-500/8 px-2 py-1 text-xs text-emerald-200">
+                  {{ agent_name }}
+                </span>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </summary>
+
+        <div class="grid gap-3 pt-3">
+          {% for run in model_group.runs %}
+          <a href="{{ run_url(run) }}"
+             data-run-card
+             data-run-encoded-path="{{ run.path | encode_path }}"
+             data-run-agent="{{ run.agent_name }}"
+             data-run-model="{{ run.model_name }}"
+             data-run-status="{{ run.status }}"
+             data-run-duration-ms="{{ run.duration_ms }}"
+             class="block rounded-lg border border-slate-700/50 bg-surface hover:bg-surface-light hover:border-slate-600 transition-all">
+            <div class="p-4 flex items-start justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2 mb-2">
+                  {% if run.status == 'running' %}
+                  <span data-run-status-badge class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-xs font-semibold">
+                    <span class="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+                    <span data-run-status-label>Running</span>
+                  </span>
+                  {% elif run.status == 'completed' %}
+                  <span data-run-status-badge class="px-2 py-0.5 rounded bg-green-500/10 text-green-300 border border-green-500/20 text-xs font-semibold">
+                    <span data-run-status-label>Finished</span>
+                  </span>
+                  {% elif run.status == 'interrupted' %}
+                  <span data-run-status-badge class="px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-300 border border-yellow-500/20 text-xs font-semibold">
+                    <span data-run-status-label>Stopped</span>
+                  </span>
+                  {% elif run.status == 'failed' %}
+                  <span data-run-status-badge class="px-2 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20 text-xs font-semibold">
+                    <span data-run-status-label>Failed</span>
+                  </span>
+                  {% elif run.status == 'cancelled' %}
+                  <span data-run-status-badge class="px-2 py-0.5 rounded bg-slate-600/40 text-slate-300 border border-slate-500/40 text-xs font-semibold">
+                    <span data-run-status-label>Cancelled</span>
+                  </span>
+                  {% else %}
+                  <span data-run-status-badge class="px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 border border-slate-600 text-xs font-semibold">
+                    <span data-run-status-label>Pending</span>
+                  </span>
+                  {% endif %}
+                  <span class="text-white font-semibold truncate">{{ run.run_id }}</span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span>{{ run.agent_name }}</span>
+                </div>
+                <div class="mt-2 text-sm text-slate-400 truncate">{{ run.experiment }}</div>
+
+                {% if run.running %}
+                <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm" data-run-live-row>
+                  <span class="text-sky-300 font-semibold" data-run-live="steps">{{ run.live_total_requests }} steps</span>
+                  <span class="text-slate-300">
+                    elapsed <span data-run-live="elapsed">{{ run.duration_ms | fmt_duration }}</span>
+                  </span>
+                  <span class="text-slate-400" data-run-live="velocity">
+                    {% if run.duration_ms and run.live_total_requests %}
+                    {{ "%.1f"|format(run.live_total_requests * 60000.0 / run.duration_ms) }} steps/min
+                    {% else %}-{% endif %}
+                  </span>
+                  <span class="{% if run.live_errors %}text-yellow-300{% else %}text-slate-400{% endif %}" data-run-live="errors">
+                    {{ "%.1f"|format((run.live_errors * 100.0 / run.live_total_requests) if run.live_total_requests else 0) }}% errors
+                  </span>
+                  <span class="text-slate-500">active <span data-age-ts="{{ run.last_active_ts_ms }}" data-run-live="age">{{ run.last_active_ts_ms | fmt_age }}</span></span>
+                  <span class="text-slate-400" data-run-live="trials">{{ run.running_trials }} trial{% if run.running_trials != 1 %}s{% endif %} running</span>
+                </div>
+                {% else %}
+                {% for label, agent in run.agents.items() %}
+                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs"
+                     title="Trial outcomes from current artifacts">
+                  <span data-run-agent-count="completed"
+                        class="rounded border border-green-500/25 bg-green-500/10 px-2 py-1 text-green-200">
+                    Completed {{ agent.completed }}
+                  </span>
+                  <span data-run-agent-count="stopped"
+                        class="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-amber-200">
+                    Stopped {{ agent.get('warnings', 0) }}
+                  </span>
+                  <span data-run-agent-count="failed"
+                        class="rounded border border-red-500/25 bg-red-500/10 px-2 py-1 text-red-200">
+                    Failed {{ agent.failed }}
+                  </span>
+                  {% if agent.get('running', 0) %}
+                  <span data-run-agent-count="running"
+                        class="rounded border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-sky-200">
+                    Running {{ agent.running }}
+                  </span>
+                  {% endif %}
+                  <span data-run-agent-count="total"
+                        class="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-slate-300">
+                    Total {{ agent.total }}
+                  </span>
+                  {% for metric, val in agent.get('mean_scores', {}).items() %}
+                  <span>
+                    <span class="text-slate-400">{{ metric }}:</span>
+                    <span class="{% if val >= 0.7 %}text-green-400{% elif val >= 0.3 %}text-yellow-400{% else %}text-slate-300{% endif %} font-semibold">
+                      {{ "%.2f"|format(val) }}
+                    </span>
+                  </span>
+                  {% endfor %}
+                </div>
+                {% endfor %}
+                {% endif %}
+              </div>
+
+              <div class="text-right text-xs text-slate-500 shrink-0 whitespace-nowrap">
+                {% set latest_run = run.run_history[-1] if run.run_history else none %}
+                <div class="text-slate-400">Last run</div>
+                <div class="mt-1 font-mono text-slate-300">{{ latest_run.started_at if latest_run else run.started_at }}</div>
+                <div class="mt-1">{{ (latest_run.duration_ms if latest_run else run.duration_ms) | fmt_duration }}</div>
+                {% if run.run_history | length > 1 %}
+                <div class="mt-1 text-blue-300">{{ run.run_history | length }} run attempts</div>
+                <div class="mt-1">First: {{ run.started_at }}</div>
+                {% elif run.completed_at %}
+                <div class="mt-1">{{ run.completed_at }}</div>
+                {% endif %}
+              </div>
+            </div>
+          </a>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if runs %}
+<script>
+const runFilterState = {
+  agent: document.getElementById('run-agent-filter'),
+  model: document.getElementById('run-model-filter'),
+  status: document.getElementById('run-status-filter'),
+  duration: document.getElementById('run-duration-filter'),
+  summary: document.getElementById('run-filter-summary'),
+  preserveModelPanels: document.getElementById('run-filters')?.dataset.preserveModelPanels === 'true',
+};
+
+function applyRunFilters() {
+  const agent = runFilterState.agent?.value || '';
+  const model = runFilterState.model?.value || '';
+  const status = runFilterState.status?.value || '';
+  const minDuration = Number(runFilterState.duration?.value || 0);
+  const shouldAutoOpenGroups = Boolean(agent || model || status);
+  let visible = 0;
+  let total = 0;
+  for (const card of document.querySelectorAll('[data-run-card]')) {
+    total += 1;
+    const isRunning = card.dataset.runStatus === 'running';
+    const match =
+      (!agent || card.dataset.runAgent === agent) &&
+      (!model || card.dataset.runModel === model) &&
+      (!status || card.dataset.runStatus === status) &&
+      (isRunning || Number(card.dataset.runDurationMs || 0) >= minDuration);
+    card.classList.toggle('hidden', !match);
+    if (match) visible += 1;
+  }
+  for (const group of document.querySelectorAll('.run-model-panel, .run-project-group')) {
+    const hasVisible = Boolean(group.querySelector('[data-run-card]:not(.hidden)'));
+    const shouldHideGroup = !hasVisible && !runFilterState.preserveModelPanels;
+    group.classList.toggle('hidden', shouldHideGroup);
+    if (hasVisible && shouldAutoOpenGroups && group.tagName === 'DETAILS') {
+      group.open = true;
+    }
+  }
+  if (runFilterState.summary) {
+    const durationText = minDuration ? ` · >=${Math.round(minDuration / 60000)}m or running` : '';
+    runFilterState.summary.textContent = `${visible} / ${total} runs${durationText}`;
+  }
+}
+
+for (const el of [runFilterState.agent, runFilterState.model, runFilterState.status, runFilterState.duration]) {
+  if (el) el.addEventListener('change', applyRunFilters);
+}
+applyRunFilters();
+</script>
+{% endif %}
+<script>
+/* Live polling for the index page */
+(function () {
+  const liveRunCounts = document.querySelectorAll('[data-running-count]');
+  const updatedEl = document.getElementById('index-live-updated');
+  const STATUS_LABELS = {
+    running: 'Running',
+    completed: 'Finished',
+    interrupted: 'Stopped',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+    pending: 'Pending',
+  };
+  const STATUS_CLASSES = {
+    running: 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-xs font-semibold',
+    completed: 'px-2 py-0.5 rounded bg-green-500/10 text-green-300 border border-green-500/20 text-xs font-semibold',
+    interrupted: 'px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-300 border border-yellow-500/20 text-xs font-semibold',
+    failed: 'px-2 py-0.5 rounded bg-red-500/10 text-red-300 border border-red-500/20 text-xs font-semibold',
+    cancelled: 'px-2 py-0.5 rounded bg-slate-600/40 text-slate-300 border border-slate-500/40 text-xs font-semibold',
+    pending: 'px-2 py-0.5 rounded bg-slate-700/50 text-slate-300 border border-slate-600 text-xs font-semibold',
+  };
+
+  function setText(el, value) {
+    if (!el) return;
+    const v = String(value == null ? '' : value);
+    if (el.textContent !== v) el.textContent = v;
+  }
+
+  function updateRunCard(payload) {
+    const card = document.querySelector(`[data-run-card][data-run-encoded-path="${CSS.escape(payload.encoded_path)}"]`);
+    if (!card) return false;  // unknown run — needs a full reload
+    const status = payload.status || (payload.running ? 'running' : (payload.completed_at ? 'completed' : 'pending'));
+    card.dataset.runStatus = status;
+    card.dataset.runDurationMs = String(payload.duration_ms || 0);
+    const badge = card.querySelector('[data-run-status-badge]');
+    if (badge) {
+      badge.className = STATUS_CLASSES[status] || STATUS_CLASSES.pending;
+      let label = badge.querySelector('[data-run-status-label]');
+      if (!label) {
+        label = document.createElement('span');
+        label.dataset.runStatusLabel = '';
+        badge.append(label);
+      }
+      if (status === 'running' && !badge.querySelector('.live-pulse-dot')) {
+        const dot = document.createElement('span');
+        dot.className = 'live-pulse-dot h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse';
+        badge.prepend(dot);
+      } else if (status !== 'running') {
+        badge.querySelector('.live-pulse-dot')?.remove();
+      }
+      setText(label, STATUS_LABELS[status] || 'Pending');
+    }
+
+    if (payload.running) {
+      const liveRow = card.querySelector('[data-run-live-row]');
+      if (liveRow) {
+        const steps = liveRow.querySelector('[data-run-live="steps"]');
+        const elapsed = liveRow.querySelector('[data-run-live="elapsed"]');
+        const velocity = liveRow.querySelector('[data-run-live="velocity"]');
+        const errors = liveRow.querySelector('[data-run-live="errors"]');
+        const age = liveRow.querySelector('[data-run-live="age"]');
+        const trials = liveRow.querySelector('[data-run-live="trials"]');
+        setText(steps, `${payload.live_total_requests || 0} steps`);
+        setText(elapsed, window.cageLive.fmtDuration(payload.duration_ms));
+        setText(velocity, window.cageLive.fmtVelocity(payload.live_total_requests, payload.duration_ms));
+        if (errors) {
+          const pct = payload.live_total_requests ? (payload.live_errors * 100 / payload.live_total_requests) : 0;
+          setText(errors, `${pct.toFixed(1)}% errors`);
+          errors.className = payload.live_errors ? 'text-yellow-300' : 'text-slate-400';
+        }
+        if (age) {
+          age.dataset.ageTs = String(payload.last_active_ts_ms || 0);
+          setText(age, window.cageLive.timeAgo(payload.last_active_ts_ms, Date.now()));
+        }
+        if (trials) {
+          const n = payload.running_trials || 0;
+          setText(trials, `${n} trial${n === 1 ? '' : 's'} running`);
+        }
+      }
+    }
+    return true;
+  }
+
+  function updateActiveRunCard(payload) {
+    const card = document.querySelector(`[data-active-run-card="${CSS.escape(payload.encoded_path)}"]`);
+    if (!card) return true;
+    if (!payload.running) return false;
+    setText(card.querySelector('[data-active-run-live="steps"]'), `${payload.live_total_requests || 0} steps`);
+    setText(card.querySelector('[data-active-run-live="elapsed"]'), window.cageLive.fmtDuration(payload.duration_ms));
+    setText(
+      card.querySelector('[data-active-run-live="velocity"]'),
+      window.cageLive.fmtVelocity(payload.live_total_requests, payload.duration_ms),
+    );
+    const errors = card.querySelector('[data-active-run-live="errors"]');
+    if (errors) {
+      setText(errors, `${payload.live_errors || 0} errors`);
+      errors.className = payload.live_errors ? 'text-yellow-200' : 'text-slate-300';
+    }
+    const trials = card.querySelector('[data-active-run-live="trials"]');
+    if (trials) {
+      const n = payload.running_trials || 0;
+      setText(trials, `${n} trial${n === 1 ? '' : 's'}`);
+    }
+    const age = card.querySelector('[data-active-run-live="age"]');
+    if (age) {
+      age.dataset.ageTs = String(payload.last_active_ts_ms || 0);
+      setText(age, window.cageLive.timeAgo(payload.last_active_ts_ms, Date.now()));
+    }
+    return true;
+  }
+
+  let needsReload = false;
+  window.cageLive.start({
+    // Scope the poll to THIS benchmark; an unscoped /api/runs returns every
+    // project's runs, none of which have a card here, forcing a reload each tick.
+    endpoint: '/api/runs?project={{ project | urlencode }}',
+    intervalMs: 3000,
+    idleBackoffMs: 10000,
+    idleAfter: 3,
+    keepAlive: () => !needsReload,
+    onTick: (payload) => {
+      let anyStatusChanged = false;
+      for (const run of payload.runs || []) {
+        const card = document.querySelector(`[data-run-card][data-run-encoded-path="${CSS.escape(run.encoded_path)}"]`);
+        const prevStatus = card ? card.dataset.runStatus : null;
+        if (!updateRunCard(run)) {
+          needsReload = true;
+          break;
+        }
+        if (!updateActiveRunCard(run)) {
+          needsReload = true;
+          break;
+        }
+        const newStatus = card ? card.dataset.runStatus : null;
+        if (prevStatus && newStatus && prevStatus !== newStatus) {
+          anyStatusChanged = true;
+        }
+      }
+      if (anyStatusChanged) needsReload = true;
+      if (needsReload) window.location.reload();
+      if (payload.summary) {
+        liveRunCounts.forEach(el => setText(el, payload.summary.running_runs));
+      }
+      setText(updatedEl, 'just now');
+      // Re-apply filters when a run transitions running → completed so the
+      // duration threshold can hide short/finished runs without a page reload.
+      if (anyStatusChanged && typeof applyRunFilters === 'function') {
+        applyRunFilters();
+      }
+    },
+  });
+})();
+</script>
+{% endblock %}

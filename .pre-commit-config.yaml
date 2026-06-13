@@ -1,0 +1,18 @@
+# Run `pre-commit install` once to enable. Mirrors the `lint` CI job.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--select, F, --fix]
+      - id: ruff-format
+        stages: [manual]
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: import-linter (hexagonal dependency direction)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]

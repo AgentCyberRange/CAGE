@@ -1,0 +1,141 @@
+# Self-declared entry in the `cage benchmark list` registry. The framework
+# discovers this block; it hardcodes no benchmark names.
+registration:
+  id: cybergym
+  display_name: CyberGym
+  description: Official CyberGym vulnerability-reproduction benchmark (produce a crashing PoC).
+  order: 5
+  samples:
+    index: cybergym.json
+
+project:
+  # Appears in run artifacts and the web inspector.
+  name: cybergym
+
+proxy:
+  # Records every model request and writes per-trial token/cost progress.
+  enabled: true
+  request_timeout: 3600
+  # The agent container reaches the model endpoint through the host HTTP proxy
+  # on the docker host gateway (same route the grading service uses). Uncomment
+  # and set if your models need it (e.g. OAuth/Anthropic via host mihomo).
+  # upstream_http_proxy: http://172.17.0.1:7890
+
+output:
+  dashboard_prompt: false
+  dashboard_output: false
+  dashboard_reasoning: false
+  csv_prompt: false
+  csv_output: false
+  csv_reasoning: false
+
+logging:
+  inspect_mode: auto
+
+eval:
+  benchmark:
+    module: ./benchmark.py
+    class: CyberGymBenchmark
+    # Task catalog: the OFFICIAL CyberGym benchmark (1507 tasks = 1368 arvo +
+    # 139 oss-fuzz), built from cybergym_data/tasks.json. Source of truth for
+    # which tasks exist, like cvebench.json / nyu_ctf.json. Regenerate with
+    # scripts/build_cybergym_index.py from-manifest.
+    benchmark_root: ./datasets
+    index_file: cybergym.json
+    # All large, machine-specific data resolves through gitignored symlinks under
+    # ./datasets/ (set them up once per machine, see datasets/README), so this
+    # committed config stays generic. Relative paths are anchored at this example
+    # dir, not the CWD.
+    #
+    #   ln -sfn /your/cybergym/data            datasets/payloads        # repo tarballs
+    #   ln -sfn /your/cybergym-server-data     datasets/server-binary   # prebuilt binaries
+    #   ln -sfn /your/cybergym/image-cache     datasets/image-cache     # (image mode only)
+    #
+    # Payloads staged into the agent container: each <data_dir>/<source>/<id>/
+    # holds repo-vul.tar.gz, description.txt, error.txt, meta.json.
+    data_dir: ./datasets/payloads
+    # --- Grading backend: BINARY mode is the default -------------------------
+    # binary_dir set -> grade against PREBUILT vul/fix binaries (~130 GB on disk)
+    # executed by a small pre-pulled base runner (cybergym/oss-fuzz-base-runner).
+    # Covers the FULL 1507-task catalog with no multi-TB image cache. Get the data:
+    #   python scripts/server_data/download_binary_only_runners.py   # base runners
+    #   wget .../cybergym-server-binary/.../cybergym-server-data.7z && 7z x ...
+    binary_dir: ./datasets/server-binary
+    # Custom subset (works in EITHER grading mode): restrict the run to a fixed
+    # list of task ids — one per line, "arvo:1065" or just "1065". Omit = the full
+    # 1507-task catalog. ./datasets/cybergym_images.txt is the official trace-100;
+    # point this at your own file to run any subset (e.g. binary mode + 100 tasks).
+    # task_ids: ./datasets/cybergym_images.txt
+    # To use IMAGE mode instead (per-task n132/arvo:<id>-<mode> images), comment
+    # out binary_dir above and uncomment these. image_cache_dir / image_cache are
+    # IGNORED while binary_dir is set (task_ids applies in both modes).
+    # image_cache_dir: ./datasets/image-cache
+    # image_cache: { pinned_task_ids: ./datasets/cybergym_images.txt, max_evictable_gb: 100, evict: true, min_free_gb: 50, preload: true }
+    # level0 repo only · level1 +description · level2 +crash trace · level3 +patch.
+    difficulty: level1
+    # Subset further from the CLI with `--sample arvo_10400 ...` or `eval.limit`.
+    grading:
+      # The interactive submit service that gives the agent `submit.sh` feedback
+      # by running the vul target. It holds the docker socket; the agent does not.
+      enabled: true
+      # host: 172.17.0.1   # agent->service via docker host gateway (default)
+      # port: 0            # 0 = auto-pick a free port
+  limit: null
+
+target:
+  # CyberGym has no per-challenge victim stack — grading is image-based and
+  # benchmark-owned, so the target_server is not used.
+  enabled: false
+
+runtime:
+  timeout: 3600
+  # max_trials_global omitted -> unlimited (cap concurrency per agent with max_concurrent)
+  passk: 1
+  # Round budget: "unlimited" = no per-trial round cap (the agent self-terminates
+  # via submit.sh on success). The run is still bounded by timeout: 3600 above —
+  # required, because a run with an unlimited budget must have another finite
+  # stop condition. Use -1 for the benchmark's built-in default, or a positive N.
+  max_rounds: unlimited
+  max_input_tokens: null
+  max_output_tokens: null
+  max_cost: null
+  agent_network_mode: bridge
+  store_proxy: true
+  live_check:
+    # The agent self-terminates via submit.sh; no target-side early-stop poll.
+    enabled: false
+
+agents:
+  - id: claude_code
+    kind: claude_code
+    models:
+      # Repo model ids from config/models.yml (see config/models.example.yml).
+      - id: glm-5.1
+        extra_env:
+          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
+          DISABLE_INTERLEAVED_THINKING: "1"
+    image: pursu1ng/cage-images:claude-code-latest
+    home: /home/agent/workspace
+    # Concurrency: how many trials this agent runs AT ONCE (not a total cap).
+    # Override at the CLI with --max-concurrent N. Raise for a faster full run.
+    max_concurrent: 3
+    # Auto-compaction trigger as a fraction (0..1) of the context window. OMIT
+    # this (the default) and each agent keeps its CLI's OWN default — Claude Code
+    # ~0.835, kimi 0.85, qwen its built-in — CAGE does not impose one. Set it
+    # ONLY to deliberately compact earlier/later, e.g.
+    #   context_compaction_threshold: 0.8
+    # Per-agent mapping: claude_code -> CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (integer
+    # percent; the CLI caps it at its own default, so you can only LOWER it),
+    # qwen_code -> chatCompression.contextPercentageThreshold, kimi_code ->
+    # loop_control.compaction_trigger_ratio. (To raise the window itself, declare
+    # max_context_size on the model — but note claude_code can't honour that.)
+    session_args:
+      - --permission-mode
+      - bypassPermissions
+      - --verbose
+      # Align with the upstream CyberGym claude_code runner's "no web tools"
+      # setting (examples/agents/claude_code/run.py: disallowed_tools =
+      # "WebFetch,WebSearch"). The PoC must come from the agent's own analysis,
+      # not from looking the CVE up on the web.
+      - --disallowedTools
+      - WebFetch,WebSearch

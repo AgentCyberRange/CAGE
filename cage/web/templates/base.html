@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Cage Inspector{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#1e293b', light: '#334155' },
+            bg: '#0f172a',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+    pre, code { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
+    .tool-result pre { max-height: 400px; overflow-y: auto; }
+    .thinking-block { border-left: 3px solid #8b5cf6; }
+    .tool-block { border-left: 3px solid #06b6d4; }
+    .text-block { border-left: 3px solid #3b82f6; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    .fade-in { animation: fadeIn 0.2s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .step-card:target { outline: 2px solid #3b82f6; outline-offset: 2px; }
+    details summary { cursor: pointer; user-select: none; }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before { content: '\25b6'; display: inline-block; margin-right: 6px; transition: transform 0.15s; font-size: 0.7em; }
+    details[open] summary::before { transform: rotate(90deg); }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen">
+  <!-- Top navbar -->
+  <nav class="sticky top-0 z-50 bg-surface/80 backdrop-blur-md border-b border-slate-700 px-6 py-3">
+    <div class="flex items-center gap-4">
+      <a href="/" class="text-lg font-bold text-white tracking-tight">
+        <span class="text-blue-400">&#9638;</span> Cage Inspector
+      </a>
+      {% block breadcrumb %}{% endblock %}
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <main class="max-w-screen-2xl mx-auto px-6 py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    /* ------------------------------------------------------------ *
+     * cageLive — shared live-polling helper
+     *
+     * Polls a JSON endpoint at a base interval; backs off when the
+     * server returns no changes; pauses when the tab is hidden;
+     * always passes ``since=<max_signature_ms>`` so the server can
+     * skip unchanged entries.
+     *
+     * Usage:
+     *   cageLive.start({
+     *     endpoint: '/api/runs',
+     *     intervalMs: 2500,
+     *     idleBackoffMs: 8000,
+     *     idleAfter: 3,
+     *     onTick: (payload, ctx) => { ... },
+     *     keepAlive: () => boolean   // stop when this returns false
+     *   });
+     * ------------------------------------------------------------ */
+    window.cageLive = (function () {
+      function timeAgo(tsMs, nowMs) {
+        if (!tsMs) return '-';
+        const delta = Math.max(0, (nowMs || Date.now()) - tsMs);
+        const s = Math.floor(delta / 1000);
+        if (s < 5) return 'just now';
+        if (s < 60) return `${s}s ago`;
+        if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+        return `${Math.floor(s / 86400)}d ago`;
+      }
+
+      function fmtTokens(n) {
+        if (!n) return '0';
+        const v = Number(n);
+        if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+        if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+        return String(Math.round(v));
+      }
+
+      function fmtDuration(ms) {
+        if (!ms) return '-';
+        const s = Math.floor(Number(ms) / 1000);
+        if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`;
+        if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
+        return `${s}s`;
+      }
+
+      function fmtVelocity(steps, durationMs) {
+        const durationMin = Number(durationMs || 0) / 60000;
+        if (!steps || !durationMin) return '-';
+        return `${(Number(steps) / durationMin).toFixed(1)} steps/min`;
+      }
+
+      function start(opts) {
+        const endpoint = opts.endpoint;
+        const baseMs = opts.intervalMs || 2500;
+        const idleMs = opts.idleBackoffMs || 8000;
+        const idleAfter = opts.idleAfter || 3;
+        const onTick = opts.onTick || (() => {});
+        const keepAlive = opts.keepAlive || (() => true);
+        let sinceMs = 0;
+        let idleTicks = 0;
+        let stopped = false;
+        let timer = null;
+        let inflight = false;
+
+        async function tick() {
+          if (stopped || inflight) return schedule();
+          if (document.hidden) return schedule(Math.max(baseMs * 2, 8000));
+          inflight = true;
+          const sep = endpoint.includes('?') ? '&' : '?';
+          const url = sinceMs ? `${endpoint}${sep}since=${sinceMs}` : endpoint;
+          try {
+            const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const payload = await r.json();
+            sinceMs = Math.max(sinceMs, Number(payload.max_signature_ms || 0));
+            const changedCount = (payload.runs || payload.trials || []).length;
+            if (changedCount === 0) {
+              idleTicks += 1;
+            } else {
+              idleTicks = 0;
+            }
+            onTick(payload, { sinceMs, changedCount });
+            if (!keepAlive()) {
+              stopped = true;
+              return;
+            }
+          } catch (err) {
+            console.warn('cageLive fetch failed', err);
+            idleTicks += 1;
+          } finally {
+            inflight = false;
+            const delay = idleTicks >= idleAfter ? idleMs : baseMs;
+            schedule(delay);
+          }
+        }
+
+        function schedule(ms) {
+          if (stopped) return;
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(tick, ms == null ? baseMs : ms);
+        }
+
+        document.addEventListener('visibilitychange', () => {
+          if (!stopped && !document.hidden) {
+            // Tab became visible — refresh immediately.
+            if (timer) clearTimeout(timer);
+            tick();
+          }
+        });
+
+        // Kick off after a tiny delay so the initial page render
+        // completes first.
+        timer = setTimeout(tick, 800);
+        return {
+          stop: () => { stopped = true; if (timer) clearTimeout(timer); },
+        };
+      }
+
+      function patchAge(selector) {
+        const now = Date.now();
+        document.querySelectorAll(selector).forEach((el) => {
+          const ts = Number(el.dataset.ageTs || 0);
+          if (ts) el.textContent = timeAgo(ts, now);
+        });
+      }
+
+      return { start, timeAgo, fmtTokens, fmtDuration, fmtVelocity, patchAge };
+    })();
+    /* Note: there is intentionally no wall-clock age ticker here.
+       Pages that need "active Xs ago" displays update those values
+       inside their own poll handler (or on user interaction). A
+       global setInterval over every age element on the page caused
+       noticeable repaint churn on long run-detail tables. */
+
+    async function copyInspectorText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-copy-debug-bundle]');
+      if (!button) return;
+      const sourceId = button.dataset.copyDebugTarget;
+      const source = sourceId ? document.getElementById(sourceId) : null;
+      if (!source) return;
+      let text = source.textContent || '';
+      try {
+        text = JSON.stringify(JSON.parse(text), null, 2);
+      } catch (_) {
+        text = text.trim();
+      }
+      const old = button.textContent;
+      try {
+        await copyInspectorText(text);
+        button.textContent = 'Copied';
+      } catch (_) {
+        button.textContent = 'Copy failed';
+      }
+      setTimeout(() => { button.textContent = old; }, 1000);
+    });
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

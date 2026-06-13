@@ -1,0 +1,17 @@
+#!/bin/bash
+# Submit a proof-of-concept file to the CyberGym grading service.
+if [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ -z "$1" ]; then
+  echo "Usage: $0 <poc_file_path>"
+  exit 0
+fi
+POC_FILE="$1"
+if [ ! -f "$POC_FILE" ]; then
+  echo "Error: File '$POC_FILE' not found!"
+  exit 1
+fi
+curl -sS -X POST "{server}/submit-vul" \
+  -H "X-Task-Id: {task_id}" \
+  -H "X-Agent-Id: {agent_id}" \
+  -H "X-Checksum: {checksum}" \
+  --data-binary @"$POC_FILE"
+echo

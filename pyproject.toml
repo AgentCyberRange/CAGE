@@ -1,0 +1,217 @@
+[project]
+name = "cage"
+version = "0.1.0"
+description = "Evaluation framework for installed agents (Claude Code, Codex, Hermes, etc.)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0",
+    "docker>=7.0",
+    "fastapi>=0.110",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "structlog>=24.1",
+    "jinja2>=3.1",
+    "flask>=3.0",
+    "pydantic>=2.0",
+    "psutil>=5.9",
+    "uvicorn>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "import-linter>=2.0",
+]
+[tool.setuptools.packages.find]
+include = ["cage*"]
+
+[project.scripts]
+cage = "cage.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# import-linter — machine-enforce the framework's dependency direction.
+#
+# cage/ is organised hexagonally: every package depends *down* on a tiny,
+# dependency-free core (`contracts`); the substrate (`sandbox`) and the data
+# model (`experiment.model`, `models`) sit just above it; the CLI is the only
+# entry point and is imported by nobody. The contracts below lock the boundaries
+# that are clean today so they cannot silently rot.
+#
+# NOT yet locked (known debt, deferred to the Phase-B model convergence): the
+# middle packages still form cycles — artifacts<->benchmarks, artifacts<->scoring,
+# benchmarks<->scoring, benchmarks<->config, config<->experiment.engine,
+# artifacts<->experiment.engine, experiment.engine<->web, gc<->target. A full
+# top-to-bottom `layers` contract becomes expressible only once those are cut;
+# until then we assert the clean perimeter, not a fictional total order.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "cage"
+
+[[tool.importlinter.contracts]]
+name = "contracts is the dependency-free floor"
+type = "forbidden"
+source_modules = ["cage.contracts"]
+forbidden_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.cli",
+    "cage.config",
+    "cage.experiment",
+    "cage.gc",
+    "cage.models",
+    "cage.proxy",
+    "cage.sandbox",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "the in-container proxy sidecar imports zero cage code (httpx-only)"
+type = "forbidden"
+source_modules = ["cage.proxy.sidecar"]
+forbidden_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.cli",
+    "cage.config",
+    "cage.contracts",
+    "cage.experiment",
+    "cage.gc",
+    "cage.models",
+    "cage.sandbox",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "sandbox is pure substrate (contracts only)"
+type = "forbidden"
+source_modules = ["cage.sandbox"]
+forbidden_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.cli",
+    "cage.config",
+    "cage.experiment",
+    "cage.gc",
+    "cage.models",
+    "cage.proxy",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "proxy depends only on the core and the substrate"
+type = "forbidden"
+source_modules = ["cage.proxy"]
+forbidden_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.cli",
+    "cage.config",
+    "cage.experiment",
+    "cage.gc",
+    "cage.models",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "the experiment data model is pure (contracts only, never the engine)"
+type = "forbidden"
+source_modules = ["cage.experiment.model"]
+forbidden_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.cli",
+    "cage.config",
+    "cage.experiment.engine",
+    "cage.gc",
+    "cage.models",
+    "cage.proxy",
+    "cage.sandbox",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "the model registry is pure (contracts only)"
+type = "forbidden"
+source_modules = ["cage.models"]
+forbidden_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.cli",
+    "cage.config",
+    "cage.experiment",
+    "cage.gc",
+    "cage.proxy",
+    "cage.sandbox",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "the scorer stays portable (no engine/target/web/cli/config — one scorer, three call sites)"
+type = "forbidden"
+source_modules = ["cage.scoring"]
+forbidden_modules = [
+    "cage.cli",
+    "cage.config",
+    "cage.experiment.engine",
+    "cage.gc",
+    "cage.target",
+    "cage.web",
+]
+
+[[tool.importlinter.contracts]]
+name = "the CLI is the only entry point — nothing in the framework imports it"
+type = "forbidden"
+source_modules = [
+    "cage.agents",
+    "cage.artifacts",
+    "cage.benchmarks",
+    "cage.config",
+    "cage.contracts",
+    "cage.experiment",
+    "cage.gc",
+    "cage.models",
+    "cage.proxy",
+    "cage.sandbox",
+    "cage.scoring",
+    "cage.target",
+    "cage.web",
+]
+forbidden_modules = ["cage.cli"]
+
+[[tool.importlinter.contracts]]
+name = "benchmarks stays below config (config loads benchmarks, never the reverse)"
+type = "forbidden"
+source_modules = ["cage.benchmarks"]
+forbidden_modules = ["cage.config"]

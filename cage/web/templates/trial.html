@@ -1,0 +1,1845 @@
+{% extends "base.html" %}
+{% block title %}{{ trial.trial_id }} — Cage Inspector{% endblock %}
+
+{% block head %}
+<style>
+  /* JSON overlay panel — fixed position, doesn't affect page flow */
+  #json-panel {
+    position: fixed; top: 56px; right: 0; bottom: 0;
+    width: 58%; min-width: 520px;
+    background: #0c1222; border-left: 1px solid #334155;
+    display: none; flex-direction: column; z-index: 50;
+  }
+  #json-panel.open { display: flex; }
+  #json-panel pre { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
+  .step-card.active-step { outline: 2px solid #3b82f6; outline-offset: -2px; }
+  .ctx-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(30,41,59,.8); color: #cbd5e1; border: 1px solid rgba(71,85,105,.7); }
+  .ctx-action-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 0 12px; position: sticky; top: 0; z-index: 2; background: #0c1222; }
+  .ctx-action-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 5px 9px; border-radius: 6px; border: 1px solid #334155; color: #cbd5e1; background: #111827; }
+  .ctx-mode-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; }
+  .ctx-mode-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 5px 9px; border-radius: 6px; border: 1px solid #334155; color: #cbd5e1; background: #111827; }
+  .ctx-mode-btn[data-context-mode-active="true"] { border-color: rgba(96,165,250,.75); color: #dbeafe; background: rgba(37,99,235,.18); }
+  .tap-section { border: 1px solid rgba(51,65,85,.9); border-radius: 8px; overflow: hidden; background: rgba(15,23,42,.72); margin-bottom: 10px; }
+  .tap-section > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 10px 13px; color: #e2e8f0; font-size: 13px; font-weight: 700; list-style: none; }
+  .tap-section > summary::-webkit-details-marker { display: none; }
+  .tap-section > summary .badge { margin-left: auto; font-size: 10px; font-weight: 600; color: #94a3b8; background: #172033; border: 1px solid #334155; border-radius: 999px; padding: 2px 8px; }
+  .tap-section-body { padding: 0 13px 13px; }
+  .tap-pre { white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px; line-height: 1.55; background: rgba(2,6,23,.55); border: 1px solid rgba(51,65,85,.8); border-radius: 6px; padding: 10px 12px; color: #cbd5e1; max-height: 420px; overflow: auto; }
+  .tap-msg { margin-bottom: 8px; border-radius: 6px; padding: 11px 13px; font-size: 13px; line-height: 1.6; border: 1px solid rgba(51,65,85,.8); }
+  .tap-msg.user { background: rgba(30,64,175,.20); border-color: rgba(59,130,246,.35); }
+  .tap-msg.assistant { background: rgba(6,78,59,.20); border-color: rgba(16,185,129,.35); }
+  .tap-msg.system { background: rgba(113,63,18,.20); border-color: rgba(245,158,11,.35); }
+  .tap-msg.tool_result { background: rgba(76,29,149,.20); border-color: rgba(139,92,246,.35); }
+  .tap-role { display: inline-block; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; margin-bottom: 7px; color: white; background: #64748b; }
+  .tap-msg.user .tap-role { background: #3b82f6; }
+  .tap-msg.assistant .tap-role { background: #10b981; }
+  .tap-msg.system .tap-role { background: #f59e0b; }
+  .tap-msg.tool_result .tap-role { background: #8b5cf6; }
+  .tap-msg-head { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+  .tap-msg-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1 1 220px; min-width: 0; }
+  .tap-msg-label { font-size: 12px; font-weight: 700; color: #e2e8f0; }
+  .tap-msg-preview { width: 100%; font-size: 12px; line-height: 1.5; color: #94a3b8; }
+  .tap-msg-collapsible { margin-top: 8px; border-top: 1px solid rgba(51,65,85,.55); padding-top: 8px; }
+  .tap-msg-collapsible > summary { cursor: pointer; color: #cbd5e1; font-size: 12px; font-weight: 600; list-style: none; }
+  .tap-msg-collapsible > summary::-webkit-details-marker { display: none; }
+  .tap-msg-group { margin-bottom: 10px; border: 1px solid rgba(51,65,85,.8); border-radius: 7px; background: rgba(2,6,23,.32); overflow: hidden; }
+  .tap-msg-group > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 10px 12px; color: #e2e8f0; font-size: 12px; font-weight: 700; list-style: none; }
+  .tap-msg-group > summary::-webkit-details-marker { display: none; }
+  .tap-msg-group .badge { margin-left: auto; font-size: 10px; font-weight: 600; color: #94a3b8; background: #172033; border: 1px solid #334155; border-radius: 999px; padding: 2px 8px; }
+  .tap-msg-group-body { padding: 0 10px 10px; }
+  .content-block { margin-top: 7px; white-space: pre-wrap; word-break: break-word; color: #dbeafe; }
+  .content-block:first-child { margin-top: 0; }
+  .tool-use-label, .thinking-label { display: inline-flex; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-bottom: 5px; }
+  .tool-use-label { color: #67e8f9; background: rgba(8,145,178,.16); }
+  .thinking-label { color: #c4b5fd; background: rgba(99,102,241,.16); }
+  .tool-def { border: 1px solid rgba(51,65,85,.8); border-radius: 6px; margin-bottom: 6px; overflow: hidden; background: rgba(2,6,23,.25); }
+  .tool-def-head { padding: 8px 11px; font-size: 12px; display: flex; gap: 10px; align-items: baseline; }
+  .tool-def-name { color: #67e8f9; font-family: 'JetBrains Mono','Consolas',monospace; font-weight: 700; }
+  .tool-def-desc { color: #94a3b8; min-width: 0; }
+  .tool-def-prompt { white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px; line-height: 1.55; color: #cbd5e1; background: rgba(2,6,23,.55); border: 1px solid rgba(51,65,85,.65); border-radius: 6px; padding: 10px 12px; max-height: 320px; overflow: auto; }
+  .token-bar { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: #94a3b8; margin: 4px 0 10px; }
+  .token-bar strong { color: #e2e8f0; font-family: 'JetBrains Mono','Consolas',monospace; }
+  .json-view .json-key { color: #93c5fd; }
+  .json-view .json-string { color: #86efac; }
+  .json-view .json-number { color: #c4b5fd; }
+  .json-view .json-bool { color: #fdba74; }
+  .json-view .json-null { color: #94a3b8; }
+  .diff-section { border: 1px solid rgba(51,65,85,.8); border-radius: 7px; background: rgba(2,6,23,.28); margin-bottom: 9px; overflow: hidden; }
+  .diff-section-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; color: #e2e8f0; font-size: 13px; font-weight: 700; }
+  .ds-badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 700; }
+  .ds-badge.add { color: #86efac; background: rgba(22,101,52,.3); }
+  .ds-badge.del { color: #fca5a5; background: rgba(127,29,29,.3); }
+  .ds-badge.change { color: #fcd34d; background: rgba(113,63,18,.35); }
+  .ds-badge.same { color: #94a3b8; background: rgba(51,65,85,.45); }
+  .diff-section-body { padding: 0 12px 12px; }
+  .diff-unchanged-bar { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-radius: 6px; background: rgba(30,41,59,.6); color: #94a3b8; font-size: 12px; margin-bottom: 8px; }
+  .diff-new-msg, .diff-removed-msg, .diff-modified-msg { margin-bottom: 8px; border-radius: 7px; max-height: 260px; overflow-y: auto; }
+  .diff-new-msg { border: 2px solid #22c55e; }
+  .diff-removed-msg { border: 2px solid #ef4444; opacity: .8; }
+  .diff-modified-msg { border: 2px solid #f59e0b; }
+  .diff-msg-pair { display: grid; gap: 10px; padding: 10px; }
+  .diff-msg-pane-label { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #94a3b8; margin-bottom: 6px; }
+  .diff-field-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(51,65,85,.55); font-size: 12px; }
+  .diff-field-key { min-width: 120px; flex-shrink: 0; color: #e2e8f0; font-family: 'JetBrains Mono','Consolas',monospace; font-weight: 700; }
+  .diff-field-old { color: #fca5a5; text-decoration: line-through; background: rgba(127,29,29,.28); border-radius: 4px; padding: 1px 6px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .diff-field-arrow { color: #64748b; }
+  .diff-field-new { color: #86efac; background: rgba(22,101,52,.28); border-radius: 4px; padding: 1px 6px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sbs-diff { display: grid; grid-template-columns: 1fr 1fr; font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px; line-height: 1.55; border: 1px solid rgba(51,65,85,.8); border-radius: 6px; overflow: auto; max-height: 360px; }
+  .sbs-header { padding: 5px 10px; font-size: 10px; font-weight: 800; letter-spacing: .06em; background: rgba(15,23,42,.95); border-bottom: 1px solid rgba(51,65,85,.8); position: sticky; top: 0; }
+  .sbs-header.old { color: #fca5a5; }
+  .sbs-header.new { color: #86efac; }
+  .sbs-cell { padding: 2px 10px; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid rgba(51,65,85,.35); }
+  .sbs-cell.ctx { color: #94a3b8; opacity: .65; }
+  .sbs-cell.del { color: #fca5a5; background: rgba(127,29,29,.18); }
+  .sbs-cell.add { color: #86efac; background: rgba(22,101,52,.18); }
+  @media (max-width: 900px) {
+    #json-panel { width: 100%; min-width: 0; left: 0; top: 48px; }
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumb %}
+<span class="text-slate-600 mx-1">/</span>
+<a href="/" class="text-slate-400 hover:text-white text-sm">Runs</a>
+<span class="text-slate-600 mx-1">/</span>
+<a href="{{ run_url(run_dir) }}" class="text-slate-400 hover:text-white text-sm">
+  {{ run_dir.name }}
+</a>
+<span class="text-slate-600 mx-1">/</span>
+<span class="text-slate-200 text-sm font-medium">{{ trial.trial_id }}</span>
+{% endblock %}
+
+{% block content %}
+{% if attempts %}
+{# Resume attempts bar: live attempt + any archived previous attempts.    #}
+{# Each entry links to that attempt's trial-detail page so users can      #}
+{# inspect a specific failure without leaving the trial view. Chip color  #}
+{# follows ``reason_kind`` (success/warning/error/pending) so the bar     #}
+{# tells you at a glance which attempts are real results vs. infra noise. #}
+<div class="bg-surface rounded-xl px-4 py-3 border border-slate-700/50 mb-4 flex items-center gap-3 flex-wrap text-sm">
+  <span class="text-slate-400 font-semibold text-xs uppercase tracking-wider">Attempts</span>
+  {% for a in attempts %}
+  {% set rk = a.reason_kind or 'pending' %}
+  <a href="{{ a.url }}"
+     title="{{ a.reason_label or a.termination_reason or 'no reason recorded' }}"
+     class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border transition
+       {% if a.is_current %}border-sky-400/70 bg-sky-500/15 text-sky-100
+       {% else %}border-slate-700/60 bg-slate-800/40 text-slate-300 hover:border-slate-500 hover:text-white{% endif %}">
+    <span class="text-xs font-bold tracking-wide
+      {% if a.is_live %}text-emerald-300{% else %}text-slate-400{% endif %}">
+      {{ a.display_label }}
+    </span>
+    {% if a.reason_label %}
+    <span class="text-xs px-1.5 py-0.5 rounded
+      {% if rk == 'success' %}bg-green-500/20 text-green-300
+      {% elif rk == 'warning' %}bg-yellow-500/20 text-yellow-300
+      {% elif rk == 'error' %}bg-red-500/20 text-red-300
+      {% elif rk == 'live_success' %}bg-emerald-500/20 text-emerald-300
+      {% else %}bg-slate-700/40 text-slate-400{% endif %}">{{ a.reason_label }}</span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Trial header -->
+<div data-trial-summary-root
+     data-trial-summary-endpoint="/api/trial/{{ trial_dir | encode_path }}/summary"
+     data-trial-summary-running="{{ trial_status.get('running', false) | tojson }}"
+     class="bg-surface rounded-xl p-6 border border-slate-700/50 mb-6">
+  <div class="flex items-start justify-between gap-6 flex-wrap">
+    <div>
+      <h1 class="text-xl font-bold text-white">{{ trial.trial_id }}</h1>
+      {% if trial.sample.get('name') %}
+      <p class="text-slate-400 text-sm mt-1">{{ trial.sample.name }}</p>
+      {% endif %}
+    </div>
+    <div class="flex flex-wrap gap-3">
+      <button type="button"
+              data-copy-debug-bundle="trial"
+              data-copy-debug-target="trial-debug-bundle"
+              class="px-3 py-2 rounded-lg bg-slate-700/40 text-slate-200 text-sm hover:bg-slate-700/60">
+        Copy debug bundle
+      </button>
+      {% for metric, data in trial.scores.items() %}
+      {% set val = data.value if data is mapping else data %}
+      <div class="px-3 py-2 rounded-lg text-center
+        {% if val >= 0.7 %}bg-green-500/15 border border-green-500/30
+        {% elif val > 0 %}bg-yellow-500/15 border border-yellow-500/30
+        {% else %}bg-slate-500/15 border border-slate-500/30{% endif %}">
+        <div class="text-xs text-slate-400">{{ metric }}</div>
+        <div class="text-lg font-bold
+          {% if val >= 0.7 %}text-green-400{% elif val > 0 %}text-yellow-400{% else %}text-slate-300{% endif %}">
+          {% if val is number %}{{ "%.2f"|format(val) }}{% else %}{{ val }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <script id="trial-debug-bundle" type="application/json">{{ trial_debug_bundle | tojson }}</script>
+  <div class="mt-4 pt-4 border-t border-slate-700/50 flex flex-wrap gap-6 text-sm">
+    {% set token_usage = usage or {} %}
+    <div>
+      <span class="text-slate-400">Execution:</span>
+      {% set status_kind = trial_status.get('status_kind', 'pending') %}
+      <span data-trial-summary-field="status"
+            class="font-semibold
+        {% if status_kind == 'running' %}text-sky-300
+        {% elif status_kind == 'success' %}text-slate-200
+        {% elif status_kind == 'warning' %}text-yellow-300
+        {% elif status_kind == 'error' %}text-red-300
+        {% else %}text-slate-300{% endif %}">
+        {{ trial_status.get('status_label', 'Pending') }}
+      </span>
+      <span data-trial-summary-field="status-detail"
+            class="ml-1 text-slate-500{% if not trial_status.get('status_detail') %} hidden{% endif %}">
+        {{ trial_status.get('status_detail', '') }}
+      </span>
+    </div>
+    <div>
+      <span class="text-slate-400">Benchmark outcome:</span>
+      <span data-trial-outcome-kind="{{ trial_outcome.kind }}"
+            class="font-semibold
+        {% if trial_outcome.kind == 'passed' %}text-green-300
+        {% elif trial_outcome.kind == 'partial' %}text-yellow-300
+        {% elif trial_outcome.kind == 'failed' %}text-red-300
+        {% else %}text-slate-300{% endif %}">
+        {{ trial_outcome.label }}
+      </span>
+      <span class="ml-1 text-slate-500">{{ trial_outcome.detail }}</span>
+    </div>
+    <div>
+      <span class="text-slate-400">Duration:</span>
+      <span data-trial-summary-field="duration" class="text-white font-semibold">{{ trial.meta.get('timing', {}).get('duration_ms', 0) | fmt_duration }}</span>
+    </div>
+    <div>
+      <span class="text-slate-400">Exit code:</span>
+      <span data-trial-summary-field="exit-code"
+            class="{% if trial.meta.get('exit_code', -1) == 0 %}text-green-400{% else %}text-yellow-400{% endif %} font-semibold">
+        {{ trial.meta.get('exit_code', '-') }}
+      </span>
+    </div>
+    <div>
+      <span class="text-slate-400">Tokens:</span>
+      <span data-trial-summary-field="tokens" class="text-white">
+        {{ token_usage.get('input_tokens', 0) | fmt_tokens }} in
+        /
+        {{ token_usage.get('output_tokens', 0) | fmt_tokens }} out
+        {% if token_usage.get('reasoning_tokens') %}
+        /
+        {{ token_usage.reasoning_tokens | fmt_tokens }} reasoning
+        {% endif %}
+      </span>
+    </div>
+    <div>
+      <span class="text-slate-400">Requests:</span>
+      <span data-trial-summary-field="requests" class="text-white">{{ token_usage.get('num_requests', 0) }}</span>
+    </div>
+    <div class="ml-auto flex items-center gap-3 text-xs">
+      <a href="{{ run_url(run_dir) }}" class="text-blue-300 hover:text-blue-200">Run overview</a>
+      <a href="{{ dashboard_url(run_dir) }}" class="text-blue-300 hover:text-blue-200">Dashboard</a>
+    </div>
+  </div>
+</div>
+
+<section id="trial-overview" class="bg-surface rounded-xl border border-slate-700/50 mb-6 p-6">
+  <div class="mb-4">
+    <h2 class="text-lg font-semibold text-white">Why this trial ended</h2>
+    <p class="mt-1 text-sm text-slate-400">Trial diagnosis: status, stop reason, score, and the first place to look.</p>
+  </div>
+  <div class="grid gap-3 md:grid-cols-3">
+    <div class="rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Verdict</div>
+      <div class="mt-1 text-base font-semibold text-white">{{ trial_diagnosis.verdict }}</div>
+      <div class="mt-1 text-xs text-slate-500">{{ trial_diagnosis.action }}</div>
+    </div>
+    <div class="rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Stop reason</div>
+      <div class="mt-1 text-base font-semibold text-white">{{ trial_diagnosis.reason }}</div>
+      <div class="mt-1 truncate text-xs text-slate-500">{{ trial_diagnosis.detail or trial_diagnosis.status }}</div>
+    </div>
+    <div class="rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Score</div>
+      <div class="mt-1 text-base font-semibold text-white">{{ trial_diagnosis.score }}</div>
+      <div class="mt-1 text-xs text-slate-500">Execution and benchmark result are shown separately.</div>
+    </div>
+  </div>
+  {% if termination and termination.has_content %}
+  <div class="mt-3 rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3 text-sm">
+    <div class="text-xs uppercase tracking-wider text-slate-500">Termination detail</div>
+    <div class="mt-2 flex flex-wrap gap-x-6 gap-y-2">
+      {% if termination.reason %}
+      <div><span class="text-slate-400">Reason:</span> <code class="text-slate-200">{{ termination.reason }}</code>{% if termination.reason_label %}<span class="ml-2 text-slate-500">({{ termination.reason_label }})</span>{% endif %}</div>
+      {% endif %}
+      {% if termination.source %}
+      <div><span class="text-slate-400">Source:</span> <code class="text-slate-200">{{ termination.source }}</code></div>
+      {% endif %}
+    </div>
+    {% if termination.detail %}
+    <div class="mt-3 rounded border border-slate-700/50 bg-bg px-3 py-2 text-slate-200 whitespace-pre-wrap break-words">{{ termination.detail }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+{% if live_check %}
+<div id="trial-evidence"></div>
+{% set verdict = live_check.verdict or {} %}
+{% set passed = live_check.had_passes %}
+<details class="bg-surface rounded-xl border {% if passed %}border-amber-500/30{% else %}border-slate-700/50{% endif %} mb-6" open>
+  <summary class="px-6 py-4 text-sm font-semibold {% if passed %}text-amber-200{% else %}text-slate-300{% endif %} hover:text-white">
+    Live-check audit
+    <span class="ml-2 text-xs font-normal {% if passed %}text-amber-300{% else %}text-slate-500{% endif %}">
+      {{ live_check.total_polls }} poll{% if live_check.total_polls != 1 %}s{% endif %}
+      {% if passed and live_check.first_true_index %}
+        · first success at poll #{{ live_check.first_true_index }}
+      {% elif live_check.total_polls > 0 %}
+        · never returned success
+      {% endif %}
+    </span>
+  </summary>
+  <div class="px-6 pb-5 pt-2 space-y-4 text-sm">
+    {% if verdict.get('success') %}
+    <div class="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-amber-100">
+      <div class="flex items-start gap-3">
+        <span class="mt-0.5 inline-flex h-2 w-2 rounded-full bg-amber-400"></span>
+        <div class="space-y-1">
+          <div class="font-semibold">Target validator returned success</div>
+          {% if verdict.evidence and verdict.evidence.check_done and verdict.evidence.check_done.get('message') %}
+          <div class="text-amber-200/90">Message: <code class="text-amber-50 bg-bg/40 px-1 rounded">{{ verdict.evidence.check_done.message }}</code></div>
+          {% endif %}
+          <div class="text-xs text-amber-200/70">
+            Source: <code>{{ verdict.source }}</code> · mode: <code>{{ verdict.mode }}</code>
+            {% if verdict.evidence and verdict.evidence.get('poll_index') %}
+              · at poll #{{ verdict.evidence.poll_index }}
+            {% endif %}
+          </div>
+          <div class="mt-2 text-xs text-slate-400">
+            Note: this is the benchmark target's own verdict. Target validators can be permissive (e.g. one may fire "Database modification successful" on any DB write, including legitimate user registration). Verify the agent's commands below to confirm the actual exploit.
+          </div>
+        </div>
+      </div>
+    </div>
+    {% elif live_check.total_polls > 0 %}
+    <div class="rounded-lg border border-slate-700/50 bg-bg/50 px-4 py-3 text-slate-300">
+      The live-check poller ran {{ live_check.total_polls }} times but never received a positive verdict.
+    </div>
+    {% endif %}
+
+    {% if live_check.polls %}
+    <details {% if passed %}open{% endif %}>
+      <summary class="cursor-pointer text-xs uppercase tracking-wider text-slate-500 hover:text-slate-300">Poll timeline ({{ live_check.total_polls }})</summary>
+      <div class="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-700/40 bg-bg/40">
+        <table class="w-full text-xs">
+          <tbody>
+            {% for poll in live_check.polls %}
+            <tr class="border-b border-slate-700/20 last:border-0 {% if poll.status %}bg-amber-500/8{% endif %}">
+              <td class="px-3 py-1.5 font-mono text-slate-500 w-12 text-right">#{{ poll.poll_index }}</td>
+              <td class="px-3 py-1.5 w-20">
+                {% if poll.status %}
+                <span class="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-200 font-semibold">
+                  <span class="h-1 w-1 rounded-full bg-amber-400"></span>true
+                </span>
+                {% else %}
+                <span class="text-slate-500">false</span>
+                {% endif %}
+              </td>
+              <td class="px-3 py-1.5 text-slate-300 break-all">{{ poll.message or poll.raw[:160] }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
+{% if not live_check %}
+<div id="trial-evidence"></div>
+{% endif %}
+
+{% if termination and termination.has_content %}
+<details class="bg-surface rounded-xl border border-slate-700/50 mb-6">
+  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">More termination evidence</summary>
+  <div class="px-6 pb-5 pt-2 space-y-4 text-sm">
+    <div class="flex flex-wrap gap-x-6 gap-y-2">
+      {% if termination.reason %}
+      <div><span class="text-slate-400">Reason:</span> <code class="text-slate-200">{{ termination.reason }}</code>{% if termination.reason_label %}<span class="ml-2 text-slate-500">({{ termination.reason_label }})</span>{% endif %}</div>
+      {% endif %}
+      {% if termination.source %}
+      <div><span class="text-slate-400">Source:</span> <code class="text-slate-200">{{ termination.source }}</code></div>
+      {% endif %}
+    </div>
+
+    {% if termination.detail %}
+    <div>
+      <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">Final Cause</div>
+      <div class="rounded-lg border border-slate-700/50 bg-bg px-4 py-3 text-slate-200 whitespace-pre-wrap break-words">{{ termination.detail }}</div>
+    </div>
+    {% endif %}
+
+    {% if termination.error_messages %}
+    <div>
+      <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">Recent Errors</div>
+      <div class="space-y-2">
+        {% for message in termination.error_messages %}
+        <div class="rounded-lg border border-slate-700/40 bg-bg/70 px-4 py-3 text-slate-300 whitespace-pre-wrap break-words">{{ message }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if termination.raw_detail and termination.raw_detail != termination.detail %}
+    <details class="rounded-lg border border-slate-700/50 bg-bg/40">
+      <summary class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200">Raw Termination Detail</summary>
+      <div class="px-4 pb-4">
+        <pre class="text-xs text-slate-300 whitespace-pre-wrap break-words leading-relaxed bg-bg rounded-lg p-4 max-h-80 overflow-y-auto">{{ termination.raw_detail }}</pre>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
+<!-- Score details -->
+{% for metric, data in trial.scores.items() %}
+{% if data is mapping and data.get('explanation') %}
+<details class="bg-surface rounded-xl border border-slate-700/50 mb-6">
+  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">Score: {{ metric }}</summary>
+  <div class="px-6 pb-5 pt-2 text-sm space-y-2">
+    {% if data.get('answer') %}<div><span class="text-slate-400">Answer:</span> <span class="text-white">{{ data.answer }}</span></div>{% endif %}
+    <div><span class="text-slate-400">Explanation:</span> <span class="text-slate-300">{{ data.explanation }}</span></div>
+  </div>
+</details>
+{% endif %}
+{% endfor %}
+
+<!-- Files -->
+<details
+  id="trial-files-panel"
+  class="bg-surface rounded-xl border border-slate-700/50 mb-4"
+  data-files-endpoint="/api/trial/{{ trial_dir | encode_path }}/files"
+>
+  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">
+    Files
+    <span id="trial-files-count" class="ml-2 text-xs font-normal text-slate-500">load on demand</span>
+  </summary>
+  <div class="px-6 pb-5 pt-1">
+    <div class="mb-3 flex flex-wrap gap-2 text-xs text-slate-400">
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">progress.json</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">meta.json</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">task_output.json</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">proxy trace</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">target logs</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">workspace</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">score files</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">screenshots</span>
+      <span class="rounded border border-slate-700 bg-bg/50 px-2 py-1">downloads</span>
+    </div>
+    <div
+      id="trial-files-content"
+      class="rounded-lg border border-slate-700/50 bg-bg/40 px-4 py-3 text-sm text-slate-500"
+    >
+      Load file tree on demand.
+    </div>
+  </div>
+</details>
+
+<!-- Prompt -->
+<details id="trial-raw" class="bg-surface rounded-xl border border-slate-700/50 mb-4" open>
+  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">Prompt</summary>
+  <div class="px-6 pb-5 pt-2">
+    <pre class="text-xs text-slate-300 whitespace-pre-wrap break-words leading-relaxed bg-bg rounded-lg p-4 max-h-96 overflow-y-auto">{{ trial.prompt }}</pre>
+  </div>
+</details>
+
+<!-- Final output -->
+<details class="bg-surface rounded-xl border border-slate-700/50 mb-6" open>
+  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">Final Output</summary>
+  <div class="px-6 pb-5 pt-2">
+    <div class="text-sm text-slate-200 bg-bg rounded-lg p-4 max-h-96 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed">{{ trial.output or 'No final answer captured.' }}</div>
+  </div>
+</details>
+
+<!-- Trajectory -->
+{% if trial.has_trajectory %}
+<div id="trial-trajectory" class="mb-4">
+  <h2 class="text-lg font-bold text-white">Trajectory</h2>
+  <p id="trajectory-summary" class="mt-1 text-sm text-slate-400">Loading step count, token totals, and tool timeline...</p>
+</div>
+
+<div id="trajectory-container" class="space-y-3 pb-24">
+  <div id="loading-indicator" class="flex items-center justify-center py-12 text-slate-500">
+    <svg class="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+    Loading trajectory...
+  </div>
+</div>
+<div id="scroll-sentinel" class="h-1"></div>
+
+<!-- Sticky bottom bar -->
+<div id="bottom-bar" class="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-700 px-6 py-2.5 z-50">
+  <div class="max-w-screen-2xl mx-auto flex items-center gap-4">
+    <div id="traj-status" class="text-xs text-slate-400 whitespace-nowrap shrink-0">Loading...</div>
+    <div class="w-32 h-1.5 bg-slate-800 rounded-full overflow-hidden shrink-0 hidden sm:block">
+      <div id="token-bar-fill" class="h-full bg-blue-500 rounded-full transition-all" style="width:0%"></div>
+    </div>
+    <div class="flex-1 max-w-md relative">
+      <input id="search-input" type="text" placeholder="Search steps... (Ctrl+F)"
+        class="w-full px-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+      <div id="search-count" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500 hidden"></div>
+    </div>
+    <div id="search-nav" class="flex items-center gap-1 hidden">
+      <button type="button" data-trajectory-action="search-prev" class="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 text-slate-300">&#9650;</button>
+      <button type="button" data-trajectory-action="search-next" class="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 text-slate-300">&#9660;</button>
+      <button type="button" data-trajectory-action="search-clear" class="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 text-red-400">&#10005;</button>
+    </div>
+    <div class="flex items-center gap-1.5 shrink-0">
+      <span class="text-xs text-slate-500">Step:</span>
+      <input id="step-jump" type="number" min="0" placeholder="0"
+        class="w-16 px-2 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-blue-500"
+        data-trajectory-jump>
+    </div>
+    <button type="button" data-trajectory-action="top" class="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 text-slate-300">&#8593; Top</button>
+    <button type="button" data-trajectory-action="end" class="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 text-slate-300">&#8595; End</button>
+  </div>
+</div>
+
+{% else %}
+<div id="trial-trajectory" class="bg-surface rounded-xl p-8 text-center text-slate-500 border border-slate-700/50">
+  No proxy.jsonl found. Trajectory not available.
+</div>
+{% endif %}
+
+<!-- JSON overlay panel (fixed, doesn't affect page layout) -->
+<div id="json-panel">
+  <div class="px-4 py-2 border-b border-slate-700 bg-slate-900/80 shrink-0">
+    <div class="flex items-center gap-3">
+      <span class="text-sm font-bold text-white shrink-0" id="ctx-title">Step</span>
+      <div id="ctx-meta" class="flex flex-wrap gap-1.5 min-w-0"></div>
+      <div class="flex-1"></div>
+      <button type="button" data-context-panel-action="close" class="px-2 py-0.5 text-xs rounded border border-slate-600 text-slate-400 hover:text-white shrink-0">&#10005;</button>
+    </div>
+    <div class="flex items-center gap-3 mt-2">
+      <div class="flex-1 relative max-w-xs">
+        <input id="json-search" type="text" placeholder="Search details..."
+        class="w-full px-3 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+        <span id="json-search-count" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500"></span>
+      </div>
+      <span class="text-[11px] text-slate-500">Request context inspector</span>
+    </div>
+    <div class="ctx-mode-tabs" data-context-mode-tabs>
+      <button type="button" class="ctx-mode-btn" data-context-mode="readable" data-context-mode-active="true">Readable evidence</button>
+      <button type="button" class="ctx-mode-btn" data-context-mode="tools" data-context-mode-active="false">Tool timeline</button>
+      <button type="button" class="ctx-mode-btn" data-context-mode="raw" data-context-mode-active="false">Raw JSON</button>
+    </div>
+  </div>
+  <div class="flex-1 overflow-y-auto px-4 pb-6" id="json-scroll">
+    <div id="ctx-detail" class="text-sm"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const root = document.querySelector('[data-trial-summary-root]');
+  if (!root || !window.cageLive) return;
+  const endpoint = root.dataset.trialSummaryEndpoint;
+  if (!endpoint) return;
+  const updatedEl = document.querySelector('[data-trial-summary-updated]');
+  let lastSummaryUpdate = Date.now();
+
+  function field(name) {
+    return document.querySelector(`[data-trial-summary-field="${name}"]`);
+  }
+
+  function setText(el, text) {
+    if (el) el.textContent = text == null ? '' : String(text);
+  }
+
+  function statusClass(kind) {
+    const color = {
+      running: 'text-sky-300',
+      success: 'text-slate-200',
+      warning: 'text-yellow-300',
+      error: 'text-red-300',
+    }[kind] || 'text-slate-300';
+    return `font-semibold ${color}`;
+  }
+
+  function exitCodeClass(code) {
+    return `${Number(code) === 0 ? 'text-green-400' : 'text-yellow-400'} font-semibold`;
+  }
+
+  function tokenText(usage) {
+    const u = usage || {};
+    const bits = [
+      `${window.cageLive.fmtTokens(u.input_tokens || 0)} in`,
+      `${window.cageLive.fmtTokens(u.output_tokens || 0)} out`,
+    ];
+    if (u.reasoning_tokens) bits.push(`${window.cageLive.fmtTokens(u.reasoning_tokens)} reasoning`);
+    return bits.join(' / ');
+  }
+
+  function applyTrialSummary(summary) {
+    if (!summary) return;
+    const status = field('status');
+    if (status) {
+      status.className = statusClass(summary.status_kind);
+      setText(status, summary.status_label || 'Pending');
+    }
+
+    const detail = field('status-detail');
+    if (detail) {
+      const text = summary.status_detail || '';
+      setText(detail, text);
+      detail.classList.toggle('hidden', !text);
+    }
+
+    setText(field('nav-status'), summary.status_label || 'Pending');
+    setText(field('duration'), window.cageLive.fmtDuration(summary.duration_ms || 0));
+    setText(field('nav-duration'), window.cageLive.fmtDuration(summary.duration_ms || 0));
+    setText(field('exit-code'), summary.exit_code == null ? '-' : summary.exit_code);
+    const exitCode = field('exit-code');
+    if (exitCode) exitCode.className = exitCodeClass(summary.exit_code);
+    setText(field('tokens'), tokenText(summary.usage || {}));
+    setText(field('requests'), (summary.usage || {}).num_requests || 0);
+    root.dataset.trialSummaryRunning = summary.running ? 'true' : 'false';
+  }
+
+  function markSummaryUpdated() {
+    lastSummaryUpdate = Date.now();
+    setText(updatedEl, 'just now');
+  }
+
+  setInterval(() => {
+    if (!document.hidden && updatedEl) {
+      setText(updatedEl, window.cageLive.timeAgo(lastSummaryUpdate, Date.now()));
+    }
+  }, 5000);
+
+  window.cageLive.start({
+    endpoint,
+    intervalMs: 3000,
+    idleBackoffMs: 10000,
+    idleAfter: 4,
+    onTick: (payload) => {
+      markSummaryUpdated();
+      if (payload && payload.changed && payload.summary) {
+        applyTrialSummary(payload.summary);
+      }
+    },
+    keepAlive: () => root.dataset.trialSummaryRunning === 'true',
+  });
+})();
+</script>
+{% if not trial.has_trajectory %}
+<script>
+(function () {
+  const panel = document.getElementById('trial-files-panel');
+  const target = document.getElementById('trial-files-content');
+  const count = document.getElementById('trial-files-count');
+  if (!panel || !target) return;
+  let loaded = false;
+  let loading = false;
+
+  function escFileText(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+  }
+
+  function renderDiagnostics(items) {
+    if (!items.length) return '';
+    const rows = items.map((item) => {
+      const large = item.is_large
+        ? '<span class="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200">large</span>'
+        : '';
+      const size = item.size_label ? `<span class="text-slate-500">${escFileText(item.size_label)}</span>` : '';
+      const note = item.note ? `<div class="mt-1 text-[11px] text-slate-500">${escFileText(item.note)}</div>` : '';
+      return `<a data-file-diagnostic="${escFileText(item.key || '')}" href="${escFileText(item.download_url || '#')}" class="block rounded border border-slate-700/60 bg-slate-950/40 px-3 py-2 hover:border-blue-500/40">
+        <div class="flex items-center justify-between gap-3">
+          <span class="font-semibold text-blue-200">${escFileText(item.label || item.relative_path || 'Artifact')}</span>
+          <span class="flex items-center gap-2">${large}${size}</span>
+        </div>
+        <div class="mt-1 truncate font-mono text-[11px] text-slate-400">${escFileText(item.relative_path || '')}</div>
+        ${note}
+      </a>`;
+    }).join('');
+    return `<div class="mb-4">
+      <div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Diagnostic shortcuts</div>
+      <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">${rows}</div>
+    </div>`;
+  }
+
+  function renderFiles(entries) {
+    if (!entries.length) return '<div class="text-sm text-slate-500">No files found.</div>';
+    const rows = entries.map((entry) => {
+      const leftPad = 12 + ((entry.depth || 0) * 22);
+      const name = entry.is_dir
+        ? `<span class="font-semibold text-slate-200">${escFileText(entry.name)}/</span>`
+        : `<a href="${escFileText(entry.download_url || '#')}" class="font-medium text-blue-300 hover:text-blue-200 hover:underline">${escFileText(entry.name)}</a><span class="ml-2 text-xs text-slate-500">${escFileText(entry.relative_path || '')}</span>`;
+      const size = entry.is_dir ? '' : escFileText(entry.size_label || '');
+      return `<tr class="hover:bg-slate-800/40"><td class="px-3 py-2 whitespace-nowrap" style="padding-left: ${leftPad}px">${name}</td><td class="px-3 py-2 text-right text-slate-400 whitespace-nowrap">${size}</td></tr>`;
+    }).join('');
+    return `<div class="overflow-x-auto rounded-lg border border-slate-700/50 bg-bg/40"><table class="min-w-full text-sm"><thead class="bg-slate-800/70 text-xs uppercase text-slate-400"><tr><th class="text-left font-semibold px-3 py-2">Name</th><th class="text-right font-semibold px-3 py-2 w-28">Size</th></tr></thead><tbody class="divide-y divide-slate-800/80">${rows}</tbody></table></div>`;
+  }
+
+  async function loadFiles() {
+    if (loaded || loading) return;
+    const endpoint = panel.dataset.filesEndpoint;
+    if (!endpoint) return;
+    loading = true;
+    target.innerHTML = '<div class="text-sm text-slate-500">Loading file tree...</div>';
+    try {
+      const resp = await fetch(endpoint);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      const diagnostics = Array.isArray(data.diagnostics) ? data.diagnostics : [];
+      const totalSize = data.total_size_label || '0 B';
+      const largeCount = Number(data.large_file_count || 0);
+      if (count) {
+        count.textContent = `${entries.length} entries · ${totalSize} total`
+          + (largeCount ? ` · ${largeCount} large file${largeCount === 1 ? '' : 's'}` : '');
+      }
+      target.innerHTML = renderDiagnostics(diagnostics) + renderFiles(entries);
+      loaded = true;
+    } catch (err) {
+      target.innerHTML = `<div class="text-sm text-red-300">Failed to load file tree: ${escFileText(err.message)}</div>`;
+    } finally {
+      loading = false;
+    }
+  }
+
+  panel.addEventListener('toggle', () => {
+    if (panel.open) loadFiles();
+  });
+})();
+</script>
+{% endif %}
+{% if trial.has_trajectory %}
+<script>
+const TRIAL_PATH = "{{ trial_dir | encode_path }}";
+const IS_RUNNING = {{ trial_status.get('running', false) | tojson }};
+const BATCH = 50;
+let allSteps = [];
+let renderedCount = 0;
+let totalSteps = 0;
+let totalStepsKnown = true;
+let hasMoreSteps = false;
+let totalTokens = {};
+let trajectorySummary = {};
+let isLoading = false;
+let loadObserver = null;
+let searchMatches = [];
+let searchIdx = -1;
+let activeStepIndex = -1;
+let contextCache = {};
+let trialFilesLoaded = false;
+let trialFilesLoading = false;
+let trialFilesEntries = null;
+const FILES_COLLAPSE_KEY = `cage-files-collapsed:${TRIAL_PATH}`;
+
+// ========== INIT ==========
+(async function init() {
+  const statusEl = document.getElementById('traj-status');
+  setupFilesPanel();
+  bindTrajectoryControls();
+  bindContextPanelControls();
+  statusEl.textContent = 'Loading...';
+  try {
+    await loadSteps(0, BATCH);
+    document.getElementById('loading-indicator')?.remove();
+    updateJumpMax();
+    updateStatus();
+    renderNextBatch();
+    loadObserver = new IntersectionObserver(async entries => {
+      if (!entries[0].isIntersecting) return;
+      if (renderedCount >= allSteps.length && allSteps.length < totalSteps) {
+        await loadSteps(allSteps.length, BATCH);
+      }
+      renderNextBatch();
+    }, { rootMargin: '400px' });
+    loadObserver.observe(document.getElementById('scroll-sentinel'));
+    if (IS_RUNNING) setInterval(pollForNewSteps, 5000);
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+  }
+})();
+
+function bindTrajectoryControls() {
+  document.querySelectorAll('[data-trajectory-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.trajectoryAction || '';
+      if (action === 'search-prev') searchNav(-1);
+      else if (action === 'search-next') searchNav(1);
+      else if (action === 'search-clear') clearSearch();
+      else if (action === 'top') scrollToTop();
+      else if (action === 'end') scrollToBottom();
+    });
+  });
+  document.querySelectorAll('[data-trajectory-jump]').forEach((input) => {
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') jumpToStep(input.value);
+    });
+  });
+}
+
+function bindContextPanelControls() {
+  document.querySelectorAll('[data-context-panel-action="close"]').forEach((button) => {
+    button.addEventListener('click', () => closePanel());
+  });
+  document.querySelectorAll('[data-context-mode]').forEach((button) => {
+    button.addEventListener('click', () => setContextMode(button.dataset.contextMode || 'readable'));
+  });
+  document.getElementById('trajectory-container')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-context-step-index]');
+    if (!button) return;
+    openContext(Number(button.dataset.contextStepIndex));
+  });
+  document.getElementById('ctx-detail')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-context-action]');
+    if (!button) return;
+    const action = button.dataset.contextAction || '';
+    if (action === 'copy-request') copyContextRequest(button);
+    else if (action === 'scroll-section') scrollContextSection(button.dataset.contextSection || '');
+  });
+}
+
+function setupFilesPanel() {
+  const panel = document.getElementById('trial-files-panel');
+  if (!panel) return;
+  panel.addEventListener('toggle', () => {
+    if (panel.open) loadTrialFiles();
+  });
+}
+
+async function loadTrialFiles() {
+  if (trialFilesLoaded || trialFilesLoading) return;
+  const panel = document.getElementById('trial-files-panel');
+  const target = document.getElementById('trial-files-content');
+  const count = document.getElementById('trial-files-count');
+  const endpoint = panel?.dataset?.filesEndpoint;
+  if (!target || !endpoint) return;
+
+  trialFilesLoading = true;
+  target.innerHTML = '<div class="text-sm text-slate-500">Loading file tree...</div>';
+  try {
+    const resp = await fetch(endpoint);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    const diagnostics = Array.isArray(data.diagnostics) ? data.diagnostics : [];
+    const totalSize = data.total_size_label || '0 B';
+    const largeCount = Number(data.large_file_count || 0);
+    count.textContent = `${entries.length} entries · ${totalSize} total`
+      + (largeCount ? ` · ${largeCount} large file${largeCount === 1 ? '' : 's'}` : '');
+    trialFilesEntries = entries;
+    target.innerHTML = renderTrialDiagnostics(diagnostics) + renderTrialFiles(entries);
+    bindTrialFilesToggle();
+    trialFilesLoaded = true;
+  } catch (err) {
+    target.innerHTML = `<div class="text-sm text-red-300">Failed to load file tree: ${esc(err.message)}</div>`;
+  } finally {
+    trialFilesLoading = false;
+  }
+}
+
+function renderTrialDiagnostics(items) {
+  if (!items.length) return '';
+  const rows = items.map((item) => {
+    const large = item.is_large
+      ? '<span class="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200">large</span>'
+      : '';
+    const size = item.size_label ? `<span class="text-slate-500">${esc(item.size_label)}</span>` : '';
+    const note = item.note ? `<div class="mt-1 text-[11px] text-slate-500">${esc(item.note)}</div>` : '';
+    return `<a data-file-diagnostic="${esc(item.key || '')}" href="${esc(item.download_url || '#')}" class="block rounded border border-slate-700/60 bg-slate-950/40 px-3 py-2 hover:border-blue-500/40">
+      <div class="flex items-center justify-between gap-3">
+        <span class="font-semibold text-blue-200">${esc(item.label || item.relative_path || 'Artifact')}</span>
+        <span class="flex items-center gap-2">${large}${size}</span>
+      </div>
+      <div class="mt-1 truncate font-mono text-[11px] text-slate-400">${esc(item.relative_path || '')}</div>
+      ${note}
+    </a>`;
+  }).join('');
+  return `<div class="mb-4">
+    <div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Diagnostic shortcuts</div>
+    <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">${rows}</div>
+  </div>`;
+}
+
+function loadCollapsedDirs() {
+  try {
+    const stored = sessionStorage.getItem(FILES_COLLAPSE_KEY);
+    if (stored !== null) return new Set(JSON.parse(stored));
+  } catch (_) {}
+  // First time we see this trial — auto-collapse every top-level dir
+  // except ``workspace`` so the agent's home (``.codex``, ``.npm``, …)
+  // doesn't drown the panel. The choice is persisted on first render
+  // so subsequent toggles behave normally.
+  if (trialFilesEntries) {
+    const initial = new Set();
+    for (const entry of trialFilesEntries) {
+      if (!entry.is_dir) continue;
+      if ((entry.depth || 0) !== 0) continue;
+      if (entry.name === "workspace") continue;
+      initial.add(entry.relative_path || entry.name);
+    }
+    saveCollapsedDirs(initial);
+    return initial;
+  }
+  return new Set();
+}
+function saveCollapsedDirs(collapsed) {
+  try {
+    sessionStorage.setItem(FILES_COLLAPSE_KEY, JSON.stringify([...collapsed]));
+  } catch (_) {}
+}
+
+function renderTrialFiles(entries) {
+  if (!entries.length) {
+    return '<div class="text-sm text-slate-500">No files found.</div>';
+  }
+  const collapsed = loadCollapsedDirs();
+  // Walk entries with an ancestor stack so each row knows whether any
+  // collapsed ancestor should hide it. ``hidden[i]`` is true iff any
+  // ancestor dir (lower depth) of entry i is in ``collapsed``.
+  const hidden = new Array(entries.length).fill(false);
+  const ancestors = []; // stack of {depth, path, isCollapsed}
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const depth = entry.depth || 0;
+    while (ancestors.length && ancestors[ancestors.length - 1].depth >= depth) {
+      ancestors.pop();
+    }
+    const hiddenByAncestor = ancestors.some(a => a.isCollapsed);
+    hidden[i] = hiddenByAncestor;
+    if (entry.is_dir) {
+      ancestors.push({
+        depth,
+        path: entry.relative_path || entry.name,
+        isCollapsed: hiddenByAncestor || collapsed.has(entry.relative_path || entry.name),
+      });
+    }
+  }
+
+  const rows = entries.map((entry, i) => {
+    if (hidden[i]) return '';
+    const leftPad = 12 + ((entry.depth || 0) * 22);
+    const dirPath = entry.relative_path || entry.name;
+    let label;
+    if (entry.is_dir) {
+      const isCollapsed = collapsed.has(dirPath);
+      const arrow = isCollapsed ? '▶' : '▼';
+      const togglePath = esc(dirPath);
+      const zipUrl = entry.download_zip_url ? esc(entry.download_zip_url) : '';
+      const zipBtn = zipUrl
+        ? `<a href="${zipUrl}" class="ml-2 text-xs text-slate-500 hover:text-blue-300" title="Download as zip">[zip]</a>`
+        : '';
+      label = `<button type="button" data-toggle-dir="${togglePath}" class="inline-block w-3 text-left mr-1 text-slate-400 hover:text-slate-200 select-none font-mono">${arrow}</button><span data-toggle-dir="${togglePath}" class="font-semibold text-slate-200 cursor-pointer hover:text-white">${esc(entry.name)}/</span>${zipBtn}`;
+    } else {
+      label = `<span class="inline-block w-3 mr-1"></span><a href="${esc(entry.download_url || '#')}" class="font-medium text-blue-300 hover:text-blue-200 hover:underline">${esc(entry.name)}</a><span class="ml-2 text-xs text-slate-500">${esc(entry.relative_path || '')}</span>`;
+    }
+    const size = entry.is_dir ? '' : esc(entry.size_label || '');
+    return `<tr class="hover:bg-slate-800/40"><td class="px-3 py-2 whitespace-nowrap" style="padding-left: ${leftPad}px">${label}</td><td class="px-3 py-2 text-right text-slate-400 whitespace-nowrap">${size}</td></tr>`;
+  }).join('');
+  return `<div class="overflow-x-auto rounded-lg border border-slate-700/50 bg-bg/40"><table class="min-w-full text-sm"><thead class="bg-slate-800/70 text-xs uppercase text-slate-400"><tr><th class="text-left font-semibold px-3 py-2">Name</th><th class="text-right font-semibold px-3 py-2 w-28">Size</th></tr></thead><tbody class="divide-y divide-slate-800/80">${rows}</tbody></table></div>`;
+}
+
+function bindTrialFilesToggle() {
+  const target = document.getElementById('trial-files-content');
+  if (!target || target.dataset.toggleBound === '1') return;
+  target.dataset.toggleBound = '1';
+  target.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-toggle-dir]');
+    if (!trigger) return;
+    const dirPath = trigger.getAttribute('data-toggle-dir');
+    if (!dirPath) return;
+    const collapsed = loadCollapsedDirs();
+    if (collapsed.has(dirPath)) collapsed.delete(dirPath);
+    else collapsed.add(dirPath);
+    saveCollapsedDirs(collapsed);
+    if (trialFilesEntries) {
+      target.innerHTML = renderTrialFiles(trialFilesEntries);
+    }
+  });
+}
+
+async function loadSteps(offset, limit) {
+  const resp = await fetch(`/api/trajectory/${TRIAL_PATH}?offset=${offset}&limit=${limit}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const incoming = data.steps || [];
+  if (offset === 0) allSteps = incoming;
+  else mergeSteps(incoming);
+  hasMoreSteps = Boolean(data.has_more);
+  totalStepsKnown = data.total_steps_known !== false;
+  totalSteps = Math.max(
+    data.total_steps || allSteps.length,
+    allSteps.length + (hasMoreSteps ? 1 : 0),
+  );
+  totalTokens = data.total_tokens || totalTokens || {};
+  trajectorySummary = data.summary || trajectorySummary || {};
+  updateJumpMax();
+  updateStatus();
+  return data;
+}
+
+function mergeSteps(steps) {
+  const seen = new Set(allSteps.map(step => step.index));
+  for (const step of steps) {
+    if (!seen.has(step.index)) {
+      allSteps.push(step);
+      seen.add(step.index);
+    }
+  }
+  allSteps.sort((a, b) => a.index - b.index);
+}
+
+async function loadAllSteps() {
+  while (allSteps.length < totalSteps) {
+    await loadSteps(allSteps.length, Math.max(BATCH, 200));
+  }
+}
+
+async function ensureLoadedThrough(n) {
+  while (n >= allSteps.length && allSteps.length < totalSteps) {
+    await loadSteps(allSteps.length, Math.max(BATCH, n - allSteps.length + 1));
+  }
+}
+
+async function pollForNewSteps() {
+  if (isLoading) return;
+  const previousLoaded = allSteps.length;
+  const wasAtEnd = renderedCount >= previousLoaded;
+  try {
+    await loadSteps(allSteps.length, BATCH);
+    if (wasAtEnd && allSteps.length > previousLoaded) renderNextBatch();
+  } catch (_) {
+    // A live proxy write can briefly race the JSONL reader; keep the current view stable.
+  }
+}
+
+function updateJumpMax() {
+  const jump = document.getElementById('step-jump');
+  if (jump) jump.max = Math.max(totalSteps - 1, 0);
+}
+
+// ========== RENDERING ==========
+function renderNextBatch() {
+  if (isLoading || renderedCount >= allSteps.length) return;
+  isLoading = true;
+  const container = document.getElementById('trajectory-container');
+  const end = Math.min(renderedCount + BATCH, allSteps.length);
+  const fragment = document.createDocumentFragment();
+  for (let i = renderedCount; i < end; i++) {
+    const div = document.createElement('div');
+    div.id = `step-${allSteps[i].index}`;
+    div.className = 'step-card bg-surface rounded-xl border border-slate-700/50 overflow-hidden';
+    div.innerHTML = buildStepHTML(allSteps[i]);
+    fragment.appendChild(div);
+  }
+  container.appendChild(fragment);
+  renderedCount = end;
+  isLoading = false;
+  updateStatus();
+}
+
+async function renderAllRemaining() {
+  await loadAllSteps();
+  while (renderedCount < allSteps.length) renderNextBatch();
+}
+
+function buildStepHTML(step) {
+  const toolNames = step.blocks.filter(b => b.type === 'tool_use').map(b => b.name).join(', ');
+  let html = `<div class="px-5 py-2.5 bg-slate-800/50 border-b border-slate-700/30 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-white font-bold text-sm">Step ${step.index}</span>
+      <span class="text-slate-600 text-xs">|</span>
+      <span class="text-xs text-slate-400">
+        <span class="text-blue-300">${fmtTok(step.tokens.in)}</span> in
+        <span class="text-slate-600 mx-0.5">/</span>
+        <span class="text-emerald-300">${fmtTok(step.tokens.out)}</span> out
+        ${step.tokens.reasoning ? `<span class="text-slate-600 mx-0.5">/</span><span class="text-violet-300">${fmtTok(step.tokens.reasoning)}</span> reas.` : ''}
+      </span>
+      <span class="text-xs text-slate-600">${esc(toolNames)}</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" data-context-step-index="${step.index}" class="px-2 py-0.5 text-xs bg-slate-700/50 border border-slate-600 rounded hover:bg-slate-600 text-slate-400 hover:text-white transition-colors" title="View raw JSON">
+        JSON
+      </button>
+      <span class="text-xs text-slate-500">${fmtTok(step.cumulative.in)} / ${fmtTok(step.cumulative.out)}</span>
+    </div>
+  </div>`;
+
+  html += `<div class="step-body p-4 space-y-2.5">`;
+  if (!step.blocks.length) {
+    html += `<div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+      <div class="text-sm font-medium text-amber-200">No response content captured for this step.</div>
+      <div class="mt-1 text-xs text-amber-100/80">Open JSON to inspect the raw proxy record.</div>
+    </div>`;
+  }
+  for (const block of step.blocks) {
+    if (block.type === 'thinking') html += thinkingHTML(block.content);
+    else if (block.type === 'text') html += textHTML(block.content);
+    else if (block.type === 'tool_use') html += toolHTML(block);
+  }
+  html += `</div>`;
+  return html;
+}
+
+function thinkingHTML(content) {
+  return `<details class="thinking-block bg-violet-950/30 rounded-lg overflow-hidden">
+    <summary class="px-4 py-2 text-xs font-semibold text-violet-300 hover:text-violet-200">Thinking <span class="text-violet-500 font-normal">(${content.length} chars)</span></summary>
+    <pre class="px-4 pb-3 text-xs text-violet-200/80 whitespace-pre-wrap break-words leading-relaxed max-h-80 overflow-y-auto">${esc(content)}</pre>
+  </details>`;
+}
+
+function textHTML(content) {
+  return `<div class="text-block bg-blue-950/20 rounded-lg px-4 py-2.5">
+    <div class="text-sm text-slate-200 whitespace-pre-wrap break-words leading-relaxed">${esc(content)}</div>
+  </div>`;
+}
+
+function toolHTML(block) {
+  let inputHtml = '';
+  const inp = block.input || {};
+  const n = block.name;
+
+  if (n === 'Bash' && inp.command) {
+    if (inp.description) inputHtml += `<div class="text-xs text-slate-500 mb-1">${esc(inp.description)}</div>`;
+    inputHtml += `<pre class="px-3 py-1.5 bg-black/30 rounded text-xs text-green-300 whitespace-pre-wrap break-all max-h-40 overflow-y-auto">$ ${esc(inp.command)}</pre>`;
+  } else if ((n === 'Read' || n === 'Write') && inp.file_path) {
+    inputHtml = `<div class="text-xs text-slate-300 font-mono">${esc(inp.file_path)}</div>`;
+    if (n === 'Write' && inp.content) {
+      inputHtml += `<pre class="mt-1 px-3 py-1.5 bg-black/30 rounded text-xs text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">${esc(inp.content.substring(0, 2000))}${inp.content.length > 2000 ? '\n...' : ''}</pre>`;
+    }
+  } else if (n === 'Edit' && inp.file_path) {
+    inputHtml = `<div class="text-xs text-slate-300 font-mono mb-1">${esc(inp.file_path)}</div>`;
+    if (inp.old_string) inputHtml += `<div class="text-xs text-red-400 px-3 py-1 bg-red-950/30 rounded font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">- ${esc(inp.old_string)}</div>`;
+    if (inp.new_string) inputHtml += `<div class="mt-0.5 text-xs text-green-400 px-3 py-1 bg-green-950/30 rounded font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">+ ${esc(inp.new_string)}</div>`;
+  } else if (n === 'Grep' && inp.pattern) {
+    inputHtml = `<div class="text-xs text-slate-300"><span class="text-cyan-400">/${esc(inp.pattern)}/</span>${inp.path ? ` in <span class="font-mono">${esc(inp.path)}</span>` : ''}</div>`;
+  } else if (n === 'Glob' && inp.pattern) {
+    inputHtml = `<div class="text-xs text-slate-300 font-mono">${esc(inp.pattern)}</div>`;
+  } else if (n === 'Agent') {
+    inputHtml = `<div class="text-xs text-slate-300">${esc(inp.description || (inp.prompt||'').substring(0, 200) || JSON.stringify(inp).substring(0, 200))}</div>`;
+  } else {
+    inputHtml = `<pre class="px-3 py-1.5 bg-black/30 rounded text-xs text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">${esc(JSON.stringify(inp, null, 2))}</pre>`;
+  }
+
+  const icons = {Bash:'$', Read:'\ud83d\udcc4', Write:'\u270f\ufe0f', Edit:'\ud83d\udd27', Grep:'\ud83d\udd0d', Glob:'\ud83d\udcc2', Agent:'\ud83e\udd16'};
+  const icon = icons[n] || '\u2699\ufe0f';
+
+  let resultHtml = '';
+  if (block.result) {
+    const rlen = block.result.length;
+    const isShort = rlen < 800;
+    const sizeLabel = rlen > 1000 ? fmtTok(rlen) + ' chars' : rlen + 'c';
+    if (isShort) {
+      resultHtml = `<div class="border-t border-cyan-900/30 px-4 py-2">
+        <pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2 max-h-60 overflow-y-auto">${esc(block.result)}</pre>
+      </div>`;
+    } else {
+      resultHtml = `<details class="border-t border-cyan-900/30">
+        <summary class="px-4 py-1.5 text-xs text-slate-400 hover:text-slate-300">Result <span class="text-slate-600">(${sizeLabel})</span></summary>
+        <div class="px-4 pb-2"><pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2.5 max-h-80 overflow-y-auto">${esc(block.result)}</pre></div>
+      </details>`;
+    }
+  }
+
+  return `<div class="tool-block bg-cyan-950/20 rounded-lg overflow-hidden">
+    <details open>
+      <summary class="px-4 py-2 text-xs font-semibold text-cyan-300 hover:text-cyan-200">
+        <span class="inline-block w-4 text-center mr-1">${icon}</span>${esc(n)}
+      </summary>
+      <div class="px-4 pb-2.5">${inputHtml}</div>
+    </details>
+    ${resultHtml}
+  </div>`;
+}
+
+// ========== JSON PANEL ==========
+async function openContext(stepIndex) {
+  const panel = document.getElementById('json-panel');
+  panel.classList.add('open');
+
+  document.querySelectorAll('.step-card.active-step').forEach(el => el.classList.remove('active-step'));
+  const card = document.getElementById(`step-${stepIndex}`);
+  if (card) card.classList.add('active-step');
+  activeStepIndex = stepIndex;
+
+  if (contextCache[stepIndex]) {
+    renderContextDetail(contextCache[stepIndex], stepIndex);
+    return;
+  }
+
+  document.getElementById('ctx-title').textContent = `Step ${stepIndex}`;
+  document.getElementById('ctx-meta').innerHTML = '';
+  document.getElementById('ctx-detail').innerHTML = '<div class="text-xs text-slate-500 py-4">Loading...</div>';
+
+  try {
+    const resp = await fetch(`/api/trajectory/${TRIAL_PATH}/step/${stepIndex}`);
+    const data = await resp.json();
+    contextCache[stepIndex] = data;
+    renderContextDetail(data, stepIndex);
+  } catch (err) {
+    document.getElementById('ctx-detail').innerHTML = `<div class="text-sm text-red-300 py-4">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderContextDetail(payload, stepIndex) {
+  document.getElementById('ctx-title').textContent = `Step ${stepIndex}`;
+  const raw = payload.raw || payload;
+  const summary = payload.summary || {};
+  const request = payload.request || {};
+  const response = payload.response || {};
+  const diff = payload.context_diff || {};
+  document.getElementById('ctx-meta').innerHTML = [
+    summary.model ? chip(summary.model) : '',
+    summary.status ? chip(summary.status) : '',
+    summary.stop_reason ? chip(summary.stop_reason) : '',
+    chip(`${summary.message_count || 0} msg`),
+    chip(`${summary.tool_count || 0} tools`),
+  ].join('');
+
+  const tools = request.tools || [];
+  const messages = request.messages || [];
+  const content = response.content || [];
+  let html = renderTokenUsage(summary.tokens || {});
+
+  html += '<div data-context-mode-panel="readable">';
+  html += '<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Readable evidence</div>';
+  if (content.length || response.error) {
+    html += section('Agent response', renderResponseContent(content, response), true, `${response.tool_names?.length || 0} tools`);
+  }
+  if (messages.length) {
+    html += section('Conversation context', renderMessages(messages), true, `${messages.length} messages`);
+  }
+  html += section(
+    'Context changes',
+    renderContextDiff(diff),
+    false,
+    diff.previous_step_index === null || diff.previous_step_index === undefined ? 'no previous' : `from step ${diff.previous_step_index}`,
+    'context-diff-readable',
+  );
+  html += '</div>';
+
+  html += '<div data-context-mode-panel="tools" class="hidden">';
+  html += '<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Tool timeline</div>';
+  if (tools.length) {
+    html += section('Available tools', renderRequestTools(tools), true, `${tools.length} tools`);
+  } else {
+    html += '<div class="text-xs text-slate-500 py-3">No tool definitions recorded for this step.</div>';
+  }
+  if (request.system) {
+    html += section('System Prompt', `<div class="tap-pre">${esc(request.system)}</div>`, false, `${request.system_chars || request.system.length} chars`);
+  }
+  if (messages.length) {
+    html += section('Messages', renderMessages(messages), false, `${messages.length} messages`);
+  }
+  html += '</div>';
+
+  html += '<div data-context-mode-panel="raw" class="hidden">';
+  html += '<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Raw JSON</div>';
+  html += '<div class="ctx-action-bar">';
+  html += `<button type="button" class="ctx-action-btn" data-context-action="copy-request">Request JSON</button>`;
+  html += `<button type="button" class="ctx-action-btn" data-context-action="scroll-section" data-context-section="context-diff">Diff with Prev</button>`;
+  html += `<button type="button" class="ctx-action-btn" data-context-action="scroll-section" data-context-section="full-json">Full JSON</button>`;
+  html += '</div>';
+  html += section(
+    'Context Diff',
+    renderContextDiff(diff),
+    false,
+    diff.previous_step_index === null || diff.previous_step_index === undefined ? 'no previous' : `from step ${diff.previous_step_index}`,
+    'context-diff',
+  );
+  html += section('Full JSON', `<pre id="ctx-json" class="json-view tap-pre">${syntaxColorJSON(raw)}</pre>`, false, 'raw', 'full-json');
+  html += '</div>';
+
+  document.getElementById('ctx-detail').innerHTML = html;
+  setContextMode('readable');
+  document.getElementById('json-scroll').scrollTop = 0;
+  document.getElementById('json-search').value = '';
+  document.getElementById('json-search-count').textContent = '';
+}
+
+function setContextMode(mode) {
+  const panel = document.getElementById('json-panel');
+  if (!panel) return;
+  panel.querySelectorAll('[data-context-mode]').forEach((button) => {
+    const active = button.dataset.contextMode === mode;
+    button.dataset.contextModeActive = String(active);
+  });
+  panel.querySelectorAll('[data-context-mode-panel]').forEach((sectionEl) => {
+    sectionEl.classList.toggle('hidden', sectionEl.dataset.contextModePanel !== mode);
+  });
+}
+
+function chip(text) {
+  return `<span class="ctx-chip">${esc(text)}</span>`;
+}
+
+function section(title, body, defaultOpen = true, badge = null, id = null) {
+  const open = defaultOpen ? ' open' : '';
+  const badgeHtml = badge ? `<span class="badge">${esc(badge)}</span>` : '';
+  const idAttr = id ? ` id="${esc(id)}"` : '';
+  return `<details${idAttr} class="tap-section"${open}><summary><span>&#9654;</span><span>${esc(title)}</span>${badgeHtml}</summary><div class="tap-section-body">${body}</div></details>`;
+}
+
+function renderTokenUsage(tokens) {
+  return `<div class="token-bar">
+    <span>input <strong>${fmtTok(tokens.in || tokens.input_tokens || 0)}</strong></span>
+    <span>output <strong>${fmtTok(tokens.out || tokens.output_tokens || 0)}</strong></span>
+    <span>reasoning <strong>${fmtTok(tokens.reasoning || tokens.reasoning_tokens || 0)}</strong></span>
+  </div>`;
+}
+
+function renderRequestTools(tools) {
+  return tools.map(tool => {
+    const name = tool.name || 'unknown';
+    const desc = tool.description || '';
+    const schema = tool.input_schema || tool.parameters || {};
+    const props = schema.properties || {};
+    const required = new Set(schema.required || []);
+    const params = Object.keys(props).map(key => {
+      const p = props[key] || {};
+      const req = required.has(key) ? '<span class="ds-badge del">required</span>' : '';
+      return `<div class="diff-field-row"><span class="diff-field-key">${esc(key)}</span><span class="ctx-chip">${esc(p.type || (p.enum ? 'enum' : ''))}</span>${req}<span class="text-slate-400">${esc(p.description || '')}</span></div>`;
+    }).join('');
+    const prompt = desc ? `<div class="px-3 pb-3"><div class="tool-def-prompt">${esc(desc)}</div></div>` : '';
+    return `<div class="tool-def"><div class="tool-def-head"><span class="tool-def-name">${esc(name)}</span><span class="tool-def-desc">${esc(desc ? `${desc.length} chars` : '')}</span></div>${prompt}${params ? `<div class="px-3 pb-3">${params}</div>` : ''}</div>`;
+  }).join('');
+}
+
+function renderMessages(messages) {
+  const list = Array.isArray(messages) ? messages.filter(Boolean) : [];
+  if (!list.length) return '<div class="text-xs text-slate-500">No messages</div>';
+
+  let html = '';
+  let firstAssistant = list.findIndex(message => (message?.role || '') === 'assistant');
+  if (firstAssistant < 0) firstAssistant = 0;
+
+  const setupMessages = firstAssistant > 0 ? list.slice(0, firstAssistant) : [];
+  let activeMessages = firstAssistant > 0 ? list.slice(firstAssistant) : list.slice();
+
+  if (setupMessages.length) {
+    html += `<details class="tap-msg-group"><summary><span>Setup context</span><span class="badge">${setupMessages.length} messages</span></summary><div class="tap-msg-group-body">${setupMessages.map(message => renderMessageCard(message, { forceCollapsed: true })).join('')}</div></details>`;
+  }
+
+  const focusCount = 4;
+  if (activeMessages.length > focusCount) {
+    const earlierMessages = activeMessages.slice(0, activeMessages.length - focusCount);
+    activeMessages = activeMessages.slice(-focusCount);
+    html += `<details class="tap-msg-group"><summary><span>Earlier messages</span><span class="badge">${earlierMessages.length} hidden</span></summary><div class="tap-msg-group-body">${earlierMessages.map(message => renderMessageCard(message, { forceCollapsed: true })).join('')}</div></details>`;
+  }
+
+  html += activeMessages.map(message => renderMessageCard(message)).join('');
+  return html;
+}
+
+function messageText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return content ? JSON.stringify(content, null, 2) : '';
+  return content.map(block => {
+    if (!block || typeof block !== 'object') return String(block);
+    if (block.type === 'text' || block.type === 'input_text' || block.type === 'output_text') return block.text || '';
+    if (block.type === 'thinking') return block.thinking || block.text || '';
+    if (block.type === 'tool_use') return `[tool_use: ${block.name || 'tool_use'}]\n${JSON.stringify(block.input || {}, null, 2)}`;
+    if (block.type === 'tool_result') {
+      if (typeof block.content === 'string') return block.content;
+      if (Array.isArray(block.content)) {
+        return block.content.map(item => item && item.type === 'text' ? item.text || '' : JSON.stringify(item, null, 2)).join('\n');
+      }
+      return JSON.stringify(block.content, null, 2);
+    }
+    return JSON.stringify(block, null, 2);
+  }).filter(Boolean).join('\n\n');
+}
+
+function previewText(text, limit = 180) {
+  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  return compact.length > limit ? compact.slice(0, limit - 1) + '…' : compact;
+}
+
+function isCompactionMessage(text) {
+  return /CONTEXT CHECKPOINT COMPACTION/i.test(String(text || ''));
+}
+
+function messageSummary(message) {
+  const role = message?.role || 'unknown';
+  const text = messageText(message?.content || '');
+  const chars = text.length;
+  const blocks = Array.isArray(message?.content) ? message.content.length : (message?.content ? 1 : 0);
+  const isCompaction = isCompactionMessage(text);
+  const tags = [];
+  let label = role === 'assistant' ? 'Assistant message' : role === 'developer' ? 'Developer instructions' : role === 'user' ? 'User message' : role;
+
+  if (text.includes('<permissions instructions>')) {
+    label = 'Permissions instructions';
+    tags.push('setup');
+  } else if (text.includes('<skills_instructions>')) {
+    label = 'Skills instructions';
+    tags.push('setup');
+  } else if (text.includes('<environment_context>')) {
+    label = 'Environment context';
+    tags.push('setup');
+  } else if (text.includes('## Description') && text.includes('## Target')) {
+    label = 'Task instructions';
+    tags.push('setup');
+  } else if (isCompaction) {
+    label = 'Context checkpoint compaction prompt';
+    tags.push('internal');
+  }
+
+  return {
+    role,
+    text,
+    chars,
+    blocks,
+    label,
+    tags,
+    preview: isCompaction ? 'Internal handoff request generated during context checkpoint compaction.' : previewText(text),
+    isCompaction,
+  };
+}
+
+function renderMessageCard(message, options) {
+  options = options || {};
+  const role = message?.role || 'unknown';
+  const cls = role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : role === 'tool' ? 'tool_result' : (role === 'system' || role === 'developer') ? 'system' : 'system';
+  const summary = messageSummary(message);
+  const metaChips = [
+    summary.label ? `<span class="tap-msg-label">${esc(summary.label)}</span>` : '',
+    ...summary.tags.map(tag => chip(tag)),
+    summary.chars ? chip(`${summary.chars} chars`) : '',
+    summary.blocks ? chip(`${summary.blocks} blocks`) : '',
+  ].filter(Boolean).join('');
+  const preview = summary.preview ? `<div class="tap-msg-preview">${esc(summary.preview)}</div>` : '';
+  const body = renderContent(message?.content, role);
+  const header = `<div class="tap-msg-head"><div class="tap-role">${esc(role)}</div><div class="tap-msg-meta">${metaChips}</div>${preview}</div>`;
+  const shouldCollapse = options.forceCollapsed !== undefined ? options.forceCollapsed : (role === 'developer' || summary.chars > 900 || summary.isCompaction);
+
+  if (!body) return `<div class="tap-msg ${cls}">${header}</div>`;
+  if (shouldCollapse) {
+    const summaryLabel = summary.isCompaction ? 'Open internal prompt' : 'Open full message';
+    return `<div class="tap-msg ${cls}">${header}<details class="tap-msg-collapsible"><summary>${esc(summaryLabel)}</summary><div class="pt-2">${body}</div></details></div>`;
+  }
+  return `<div class="tap-msg ${cls}">${header}${body}</div>`;
+}
+
+function renderContent(content, role) {
+  if (typeof content === 'string') return `<div class="content-block">${esc(content)}</div>`;
+  if (!Array.isArray(content)) return `<pre class="tap-pre">${esc(JSON.stringify(content, null, 2))}</pre>`;
+  return content.map(block => {
+    if (!block || typeof block !== 'object') return `<div class="content-block">${esc(String(block))}</div>`;
+    if (block.type === 'text' || block.type === 'input_text' || block.type === 'output_text') {
+      const text = block.text || '';
+      return text ? `<div class="content-block">${esc(text)}</div>` : '';
+    }
+    if (block.type === 'thinking') {
+      const text = block.thinking || block.text || '';
+      return text ? `<div class="content-block"><span class="thinking-label">thinking</span><div class="tap-pre">${esc(text)}</div></div>` : '';
+    }
+    if (block.type === 'tool_use') {
+      return `<div class="content-block"><span class="tool-use-label">${esc(block.name || 'tool_use')}</span><pre class="tap-pre">${esc(JSON.stringify(block.input || {}, null, 2))}</pre></div>`;
+    }
+    if (block.type === 'tool_result') {
+      return `<div class="content-block"><span class="tool-use-label">result ${esc(block.tool_use_id || '')}</span>${renderToolResult(block.content)}</div>`;
+    }
+    return `<pre class="tap-pre">${esc(JSON.stringify(block, null, 2))}</pre>`;
+  }).join('');
+}
+
+function renderToolResult(content) {
+  if (typeof content === 'string') return `<div class="tap-pre">${esc(content)}</div>`;
+  if (Array.isArray(content)) {
+    return content.map(item => {
+      if (item && item.type === 'text') return `<div class="tap-pre">${esc(item.text || '')}</div>`;
+      return `<pre class="tap-pre">${esc(JSON.stringify(item, null, 2))}</pre>`;
+    }).join('');
+  }
+  return `<pre class="tap-pre">${esc(JSON.stringify(content, null, 2))}</pre>`;
+}
+
+function renderResponseContent(content, response) {
+  let html = response.error ? `<div class="tap-pre text-red-300">${esc(response.error)}</div>` : '';
+  if (content.length) {
+    html += renderMessageCard({ role: 'assistant', content }, { forceCollapsed: false });
+  }
+  return html || '<div class="text-xs text-slate-500">No content</div>';
+}
+
+function renderContextDiff(diff) {
+  const messages = diff.messages || {};
+  let html = '';
+  const msgBadges = [];
+  if (messages.added_count) msgBadges.push(`<span class="ds-badge add">+${messages.added_count} new</span>`);
+  if (messages.removed_count) msgBadges.push(`<span class="ds-badge del">-${messages.removed_count} removed</span>`);
+  if (messages.modified_count) msgBadges.push(`<span class="ds-badge change">${messages.modified_count} changed</span>`);
+  if (!msgBadges.length) msgBadges.push('<span class="ds-badge same">no change</span>');
+  html += `<div class="diff-section"><div class="diff-section-header">Messages ${msgBadges.join(' ')}</div><div class="diff-section-body">`;
+  if (messages.unchanged_prefix) html += `<div class="diff-unchanged-bar"><strong>${messages.unchanged_prefix}</strong> previous messages unchanged</div>`;
+  for (const msg of messages.removed || []) html += `<div class="diff-removed-msg">${renderMessages([msg])}</div>`;
+  for (const pair of messages.modified || []) html += `<div class="diff-modified-msg"><div class="diff-msg-pair"><div><div class="diff-msg-pane-label">Before</div>${renderMessageCard(pair.old || {}, { forceCollapsed: false })}</div><div><div class="diff-msg-pane-label">After</div>${renderMessageCard(pair.new || {}, { forceCollapsed: false })}</div></div></div>`;
+  for (const msg of messages.added || []) html += `<div class="diff-new-msg">${renderMessages([msg])}</div>`;
+  if (messages.unchanged_suffix) html += `<div class="diff-unchanged-bar"><strong>${messages.unchanged_suffix}</strong> trailing messages unchanged</div>`;
+  html += '</div></div>';
+
+  const sys = diff.system || {};
+  html += `<div class="diff-section"><div class="diff-section-header">System Prompt <span class="ds-badge ${sys.changed ? 'change' : 'same'}">${sys.old_chars || 0} -> ${sys.new_chars || 0} chars</span></div>`;
+  if (sys.changed) html += `<div class="diff-section-body">${renderLineDiff(sys.old_text || '', sys.new_text || '')}</div>`;
+  html += '</div>';
+
+  const tools = diff.tools || {};
+  html += `<div class="diff-section"><div class="diff-section-header">Tools <span class="ds-badge ${tools.changed ? 'change' : 'same'}">${tools.old_count || 0} -> ${tools.new_count || 0}</span></div>`;
+  if ((tools.added || []).length || (tools.removed || []).length) {
+    html += '<div class="diff-section-body">';
+    for (const name of tools.added || []) html += `<div class="diff-field-row"><span class="diff-field-key">${esc(name)}</span><span class="ds-badge add">added</span></div>`;
+    for (const name of tools.removed || []) html += `<div class="diff-field-row"><span class="diff-field-key">${esc(name)}</span><span class="ds-badge del">removed</span></div>`;
+    html += '</div>';
+  }
+  html += '</div>';
+
+  const params = diff.params || [];
+  if (params.length) {
+    html += `<div class="diff-section"><div class="diff-section-header">Parameters <span class="ds-badge change">${params.length} changed</span></div><div class="diff-section-body">`;
+    for (const p of params) html += `<div class="diff-field-row"><span class="diff-field-key">${esc(p.key)}</span><span class="diff-field-old">${esc(JSON.stringify(p.old))}</span><span class="diff-field-arrow">-></span><span class="diff-field-new">${esc(JSON.stringify(p.new))}</span></div>`;
+    html += '</div></div>';
+  }
+  return html;
+}
+
+function renderLineDiff(oldText, newText) {
+  const oldLines = String(oldText || '').split('\n');
+  const newLines = String(newText || '').split('\n');
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix && oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]) suffix++;
+  const oldMid = oldLines.slice(prefix, suffix ? oldLines.length - suffix : oldLines.length);
+  const newMid = newLines.slice(prefix, suffix ? newLines.length - suffix : newLines.length);
+  const rows = [];
+  for (let i = Math.max(0, prefix - 2); i < prefix; i++) rows.push(`<div class="sbs-cell ctx">${esc(oldLines[i])}</div><div class="sbs-cell ctx">${esc(oldLines[i])}</div>`);
+  const max = Math.max(oldMid.length, newMid.length);
+  for (let i = 0; i < max; i++) rows.push(`<div class="sbs-cell del">${esc(oldMid[i] || '')}</div><div class="sbs-cell add">${esc(newMid[i] || '')}</div>`);
+  const startSuffix = suffix ? oldLines.length - suffix : oldLines.length;
+  for (let i = startSuffix; i < Math.min(oldLines.length, startSuffix + 2); i++) rows.push(`<div class="sbs-cell ctx">${esc(oldLines[i])}</div><div class="sbs-cell ctx">${esc(oldLines[i])}</div>`);
+  return `<div class="sbs-diff"><div class="sbs-header old">OLD</div><div class="sbs-header new">NEW</div>${rows.join('')}</div>`;
+}
+
+function syntaxColorJSON(obj) {
+  const s = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < s.length) {
+        if (s[j] === '\\') { j += 2; continue; }
+        if (s[j] === '"') break;
+        j++;
+      }
+      j++;
+      let k = j;
+      while (k < s.length && s[k] === ' ') k++;
+      const cls = k < s.length && s[k] === ':' ? 'text-blue-300' : 'text-green-300';
+      out += `<span class="${cls}">${esc(s.slice(i, j))}</span>`;
+      i = j;
+    } else if (c === '-' || (c >= '0' && c <= '9')) {
+      const match = s.slice(i).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+      if (match) {
+        out += `<span class="text-purple-400">${match[0]}</span>`;
+        i += match[0].length;
+      } else {
+        out += esc(c);
+        i++;
+      }
+    } else if (s.slice(i, i + 4) === 'true') {
+      out += '<span class="text-orange-300">true</span>';
+      i += 4;
+    } else if (s.slice(i, i + 5) === 'false') {
+      out += '<span class="text-orange-300">false</span>';
+      i += 5;
+    } else if (s.slice(i, i + 4) === 'null') {
+      out += '<span class="text-slate-500">null</span>';
+      i += 4;
+    } else {
+      out += esc(c);
+      i++;
+    }
+  }
+  return out;
+}
+
+function copyContextRequest(btn) {
+  const payload = contextCache[activeStepIndex];
+  if (!payload) return;
+  navigator.clipboard?.writeText(JSON.stringify(payload.request?.body || payload.raw || payload, null, 2));
+  const old = btn.textContent;
+  btn.textContent = 'Copied';
+  setTimeout(() => { btn.textContent = old; }, 900);
+}
+
+function scrollContextSection(id) {
+  const section = document.getElementById(id);
+  if (!section) return;
+  section.open = true;
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closePanel() {
+  document.getElementById('json-panel').classList.remove('open');
+  document.querySelectorAll('.step-card.active-step').forEach(el => el.classList.remove('active-step'));
+  activeStepIndex = -1;
+}
+
+// ========== JSON PANEL SEARCH ==========
+const jsonSearchInput = document.getElementById('json-search');
+const jsonSearchCountEl = document.getElementById('json-search-count');
+let jsonSearchMatches = [];
+let jsonSearchIdx = -1;
+
+jsonSearchInput.addEventListener('input', () => doJsonSearch());
+jsonSearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); jsonSearchNav(e.shiftKey ? -1 : 1); }
+  if (e.key === 'Escape') { jsonSearchInput.value = ''; doJsonSearch(); jsonSearchInput.blur(); }
+});
+
+function doJsonSearch() {
+  // Remove old highlights
+  document.querySelectorAll('#ctx-detail .json-hl').forEach(el => {
+    el.replaceWith(el.textContent);
+  });
+  jsonSearchMatches = [];
+  jsonSearchIdx = -1;
+
+  const q = jsonSearchInput.value.trim();
+  if (!q) { jsonSearchCountEl.textContent = ''; return; }
+
+  // Walk text nodes and wrap matches
+  const detail = document.getElementById('ctx-detail');
+  const walker = document.createTreeWalker(detail, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  const qLower = q.toLowerCase();
+  for (const node of nodes) {
+    const text = node.textContent;
+    const idx = text.toLowerCase().indexOf(qLower);
+    if (idx === -1) continue;
+    // Split text node and wrap match
+    const before = text.substring(0, idx);
+    const match = text.substring(idx, idx + q.length);
+    const after = text.substring(idx + q.length);
+    const span = document.createElement('span');
+    span.className = 'json-hl bg-yellow-500/30 text-yellow-200 rounded-sm';
+    span.textContent = match;
+    const parent = node.parentNode;
+    if (before) parent.insertBefore(document.createTextNode(before), node);
+    parent.insertBefore(span, node);
+    if (after) parent.insertBefore(document.createTextNode(after), node);
+    parent.removeChild(node);
+    jsonSearchMatches.push(span);
+  }
+
+  jsonSearchCountEl.textContent = jsonSearchMatches.length ? `${jsonSearchMatches.length} found` : 'no match';
+  if (jsonSearchMatches.length > 0) { jsonSearchIdx = 0; scrollToJsonMatch(0); }
+}
+
+function jsonSearchNav(dir) {
+  if (!jsonSearchMatches.length) return;
+  // Remove current highlight
+  if (jsonSearchIdx >= 0 && jsonSearchMatches[jsonSearchIdx]) {
+    jsonSearchMatches[jsonSearchIdx].classList.remove('ring-2', 'ring-yellow-400');
+  }
+  jsonSearchIdx = (jsonSearchIdx + dir + jsonSearchMatches.length) % jsonSearchMatches.length;
+  scrollToJsonMatch(jsonSearchIdx);
+}
+
+function scrollToJsonMatch(idx) {
+  const el = jsonSearchMatches[idx];
+  if (!el) return;
+  el.classList.add('ring-2', 'ring-yellow-400');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  jsonSearchCountEl.textContent = `${idx + 1}/${jsonSearchMatches.length}`;
+}
+
+// ========== UTILITIES ==========
+const _escDiv = document.createElement('div');
+function esc(text) {
+  if (!text) return '';
+  _escDiv.textContent = text;
+  return _escDiv.innerHTML;
+}
+
+function fmtTok(n) {
+  if (!n) return '0';
+  n = parseInt(n);
+  if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return ''+n;
+}
+
+function updateStatus() {
+  const status = document.getElementById('traj-status');
+  const summary = document.getElementById('trajectory-summary');
+  if (!totalSteps) {
+    status.textContent = IS_RUNNING ? 'Waiting for first step...' : 'No steps';
+    if (summary) summary.textContent = IS_RUNNING ? 'Waiting for the first recorded step.' : 'No trajectory steps recorded.';
+    return;
+  }
+  const renderedEnd = renderedCount ? renderedCount - 1 : 0;
+  const totalLabel = totalStepsKnown ? `${totalSteps}` : `at least ${totalSteps}`;
+  const loadedLabel = allSteps.length < totalSteps ? ` · ${allSteps.length} loaded` : '';
+  status.textContent = `Steps 0\u2013${renderedEnd} of ${totalLabel}${loadedLabel}`;
+  if (summary) {
+    const tokenBits = [
+      `${fmtTok(totalTokens.in || 0)} in`,
+      `${fmtTok(totalTokens.out || 0)} out`,
+      totalTokens.reasoning ? `${fmtTok(totalTokens.reasoning)} reasoning` : '',
+    ].filter(Boolean).join(' · ');
+    const topTools = (trajectorySummary.top_tools || [])
+      .map(tool => `${tool.name} x${tool.count}`)
+      .join(', ');
+    const requestCount = Number(trajectorySummary.requests || 0);
+    const errorCount = Number(trajectorySummary.error_count || 0);
+    const summaryBits = [
+      Number.isFinite(requestCount) ? `${requestCount} requests` : '',
+      tokenBits || 'token totals pending',
+      topTools ? `tools ${topTools}` : '',
+      trajectorySummary.last_action ? `last ${trajectorySummary.last_action}` : '',
+      Number.isFinite(errorCount) ? `${errorCount} errors` : '',
+    ].filter(Boolean);
+    summary.textContent = `Steps ${allSteps.length}/${totalLabel} loaded · ${summaryBits.join(' · ')}`;
+  }
+  if (totalTokens.out && allSteps.length && renderedCount) {
+    const last = allSteps[Math.min(renderedCount - 1, allSteps.length - 1)];
+    if (last) document.getElementById('token-bar-fill').style.width = `${Math.min((last.cumulative.out / totalTokens.out) * 100, 100)}%`;
+  }
+}
+
+// ========== NAVIGATION ==========
+async function jumpToStep(n) {
+  n = parseInt(n);
+  if (isNaN(n) || n < 0) return;
+  await ensureLoadedThrough(n);
+  while (renderedCount <= n && renderedCount < allSteps.length) renderNextBatch();
+  const el = document.getElementById(`step-${n}`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.style.outline = '2px solid #3b82f6';
+    el.style.outlineOffset = '2px';
+    setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2000);
+  }
+}
+
+function scrollToTop() { window.scrollTo({ top: 0, behavior: 'smooth' }); }
+async function scrollToBottom() {
+  await renderAllRemaining();
+  requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
+}
+
+// ========== SEARCH ==========
+const searchInput = document.getElementById('search-input');
+const searchCountEl = document.getElementById('search-count');
+const searchNavEl = document.getElementById('search-nav');
+let searchTimeout = null;
+
+searchInput.addEventListener('input', () => { clearTimeout(searchTimeout); searchTimeout = setTimeout(doSearch, 300); });
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) searchNav(-1); else searchNav(1); }
+  if (e.key === 'Escape') clearSearch();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && activeStepIndex >= 0) { closePanel(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault();
+    if (activeStepIndex >= 0) { jsonSearchInput.focus(); jsonSearchInput.select(); }
+    else { searchInput.focus(); searchInput.select(); }
+  }
+});
+
+async function doSearch() {
+  const q = searchInput.value.trim().toLowerCase();
+  document.querySelectorAll('.search-highlight').forEach(el => el.classList.remove('search-highlight', 'ring-2', 'ring-yellow-500/50'));
+  searchMatches = []; searchIdx = -1;
+  if (!q) { searchCountEl.classList.add('hidden'); searchNavEl.classList.add('hidden'); return; }
+  searchCountEl.textContent = 'Searching...';
+  searchCountEl.classList.remove('hidden');
+  searchNavEl.classList.add('hidden');
+  await loadStepsForSearch(q);
+  highlightRenderedSearchMatches();
+  searchCountEl.textContent = `${searchMatches.length} matches`;
+  searchCountEl.classList.remove('hidden');
+  searchNavEl.classList.remove('hidden');
+  if (searchMatches.length > 0) { searchIdx = 0; scrollToMatch(0); }
+}
+
+async function loadStepsForSearch(q) {
+  const seen = new Set();
+  let scanned = 0;
+  while (true) {
+    scanned = scanSearchMatches(q, scanned, seen);
+    if (totalStepsKnown && allSteps.length >= totalSteps) break;
+    const before = allSteps.length;
+    await loadSteps(allSteps.length, Math.max(BATCH, 200));
+    if (allSteps.length <= before) break;
+  }
+  scanSearchMatches(q, scanned, seen);
+}
+
+function scanSearchMatches(q, start, seen) {
+  for (let i = start; i < allSteps.length; i++) {
+    const step = allSteps[i];
+    if (seen.has(step.index)) continue;
+    for (const block of step.blocks) {
+      const content = (block.content || '') + (block.result || '') + (block.name || '') + JSON.stringify(block.input || {});
+      if (content.toLowerCase().includes(q)) {
+        searchMatches.push(step.index);
+        seen.add(step.index);
+        break;
+      }
+    }
+  }
+  return allSteps.length;
+}
+
+function highlightRenderedSearchMatches() {
+  for (const stepIndex of searchMatches) {
+    const el = document.getElementById(`step-${stepIndex}`);
+    if (el) el.classList.add('search-highlight', 'ring-2', 'ring-yellow-500/50');
+  }
+}
+
+function searchNav(dir) {
+  if (!searchMatches.length) return;
+  searchIdx = (searchIdx + dir + searchMatches.length) % searchMatches.length;
+  scrollToMatch(searchIdx);
+}
+
+async function scrollToMatch(idx) {
+  const stepIndex = searchMatches[idx];
+  await ensureLoadedThrough(stepIndex);
+  while (renderedCount <= stepIndex && renderedCount < allSteps.length) renderNextBatch();
+  highlightRenderedSearchMatches();
+  const el = document.getElementById(`step-${stepIndex}`);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  searchCountEl.textContent = `${idx + 1} / ${searchMatches.length}`;
+}
+
+function clearSearch() {
+  searchInput.value = '';
+  searchMatches = []; searchIdx = -1;
+  searchCountEl.classList.add('hidden'); searchNavEl.classList.add('hidden');
+  document.querySelectorAll('.search-highlight').forEach(el => el.classList.remove('search-highlight', 'ring-2', 'ring-yellow-500/50'));
+}
+</script>
+{% endif %}
+{% endblock %}

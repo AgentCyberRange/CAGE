@@ -1,0 +1,419 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ dashboard.run_id or run_dir.name }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="text-slate-600 mx-1">/</span>
+<a href="/" class="text-slate-400 hover:text-white text-sm">Runs</a>
+<span class="text-slate-600 mx-1">/</span>
+<a href="{{ run_url(run_dir) }}" class="text-slate-400 hover:text-white text-sm font-medium">{{ dashboard.run_id or run_dir.name }}</a>
+<span class="text-slate-600 mx-1">/</span>
+<span class="text-slate-200 text-sm font-medium">Dashboard</span>
+{% endblock %}
+
+{% block content %}
+<div class="bg-surface rounded-xl p-6 border border-slate-700/50 mb-6"
+     data-dashboard-live-endpoint="/api/run/{{ run_dir | encode_path }}/dashboard_view"
+     data-dashboard-mode="{{ dashboard_mode }}">
+  <div class="flex items-start justify-between gap-6 flex-wrap">
+    <div>
+      <h1 class="text-xl font-bold text-white">
+        {% if view %}{{ view.title or "Dashboard" }}{% else %}Dashboard{% endif %}
+      </h1>
+      <div class="flex items-center gap-2 mt-1 flex-wrap">
+        <p class="text-slate-400 text-sm font-mono">
+          {% if view and view.subtitle %}{{ view.subtitle }}{% else %}{{ dashboard.run_id or run_dir.name }}{% endif %}
+        </p>
+        {% if dashboard_mode == "live" %}
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-200 border border-emerald-500/30">Live snapshot</span>
+        {% elif dashboard_mode == "partial" %}
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-200 border border-amber-500/30">Current snapshot</span>
+        {% elif dashboard_mode == "final" %}
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700/40 text-slate-300 border border-slate-600/40">Final dashboard</span>
+        {% endif %}
+        {% if dashboard_freshness and dashboard_freshness.source %}
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
+          source: {{ dashboard_freshness.source }}{% if dashboard_freshness.mtime %} · {{ dashboard_freshness.mtime }}{% endif %}
+        </span>
+        {% endif %}
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <span class="rounded border border-slate-700 bg-slate-900/40 px-2 py-1">
+          Dashboard updated <span data-dashboard-last-updated>just now</span>
+        </span>
+        <span class="rounded border border-slate-700 bg-slate-900/40 px-2 py-1"
+              data-dashboard-freshness-state>
+          {% if dashboard_freshness and dashboard_freshness.stale %}Stale{% else %}Fresh{% endif %}:
+          saved <span data-dashboard-saved-count>{% if dashboard_freshness and dashboard_freshness.saved_count is not none %}{{ dashboard_freshness.saved_count }}{% else %}-{% endif %}</span>,
+          current <span data-dashboard-current-count>{% if dashboard_freshness %}{{ dashboard_freshness.current_count }}{% else %}-{% endif %}</span>
+        </span>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button"
+              data-copy-debug-bundle="dashboard"
+              data-copy-debug-target="dashboard-debug-bundle"
+              class="px-3 py-1.5 rounded-lg bg-slate-700/40 text-slate-200 text-sm hover:bg-slate-700/60">
+        Copy debug bundle
+      </button>
+      <a href="{{ run_url(run_dir) }}" class="px-3 py-1.5 rounded-lg bg-slate-700/40 text-slate-200 text-sm hover:bg-slate-700/60">
+        &larr; Back to run
+      </a>
+    </div>
+  </div>
+  <script id="dashboard-debug-bundle" type="application/json">{{ dashboard_debug_bundle | tojson }}</script>
+  {% if dashboard_insight %}
+  <div class="mt-5 rounded-lg border border-slate-700/50 bg-bg/35 px-4 py-3 text-sm">
+    <div class="text-xs uppercase tracking-wider text-slate-500">{{ dashboard_insight.role }}</div>
+    <div class="mt-1 font-semibold text-slate-100">{{ dashboard_insight.outcome }}</div>
+    <div class="mt-1 text-xs text-slate-400">{{ dashboard_insight.scope }}</div>
+    {% if dashboard_insight.diagnostics %}
+    <div class="mt-3 text-xs uppercase tracking-wider text-slate-500">Diagnosis shortcuts</div>
+    <div class="mt-2 flex flex-wrap gap-2 text-xs">
+      {% for item in dashboard_insight.diagnostics %}
+      <span class="rounded border px-2 py-1
+        {% if item.tone == 'failed' %}border-red-500/25 bg-red-500/10 text-red-200
+        {% elif item.tone == 'stopped' %}border-amber-500/25 bg-amber-500/10 text-amber-200
+        {% else %}border-green-500/25 bg-green-500/10 text-green-200{% endif %}">
+        {{ item.label }} {{ item.value }}
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% set run_overview_title = "project.yml summary" %}
+  {% set run_overview_wrapper_class = "mt-5 border-t border-slate-700/50 pt-4" %}
+  {% include "_run_overview.html" %}
+</div>
+
+{% if dashboard_freshness and dashboard_freshness.stale %}
+<div class="mb-6 rounded-xl border border-amber-500/35 bg-amber-500/10 px-5 py-4 text-sm text-amber-100"
+     data-dashboard-stale-banner>
+  <div class="font-semibold">Dashboard data is stale</div>
+  <div class="mt-1 text-amber-100/85">
+    Saved dashboard: {{ dashboard_freshness.saved_count }} trial{% if dashboard_freshness.saved_count != 1 %}s{% endif %}.
+    Current artifacts: {{ dashboard_freshness.current_count }} trials.
+    Use the run overview for current trial state until the benchmark dashboard is regenerated.
+  </div>
+</div>
+{% endif %}
+
+{% if dashboard_error %}
+<div class="bg-surface rounded-xl p-6 border border-red-500/30 text-slate-300">
+  <p class="text-red-200 font-semibold mb-2">{{ dashboard_error.title }}</p>
+  <p class="text-sm text-slate-300">{{ dashboard_error.detail }}</p>
+  <p class="mt-3 text-xs text-slate-500 font-mono">{{ dashboard_error.path }}</p>
+  <div class="mt-4">
+    <a href="{{ run_url(run_dir) }}" class="inline-flex rounded border border-slate-700 bg-bg px-3 py-1.5 text-sm text-blue-300 hover:text-blue-200">
+      Open generic run overview
+    </a>
+  </div>
+</div>
+{% elif not view %}
+<div class="bg-surface rounded-xl p-6 border border-yellow-500/30 text-slate-300">
+  <p class="text-yellow-200 font-semibold mb-2">No dashboard view yet</p>
+  <p class="text-sm">
+    This run has no <code class="font-mono">dashboard_view.json</code>. Either
+    the benchmark opted out, or the run completed before this feature shipped.
+    Trial artifacts, scores, proxy traces, and generic summaries are still
+    available from the inspector tabs.
+  </p>
+  <div class="mt-4 flex flex-wrap gap-2">
+    <a href="{{ run_url(run_dir) }}" class="inline-flex rounded border border-slate-700 bg-bg px-3 py-1.5 text-sm text-blue-300 hover:text-blue-200">
+      Open generic run overview
+    </a>
+  </div>
+  <div class="mt-4 rounded-lg border border-slate-700/50 bg-bg/40 px-4 py-3 text-sm">
+    <div class="text-xs uppercase tracking-wider text-slate-500">Expected artifact path</div>
+    <div class="mt-1 break-all font-mono text-slate-300">{{ run_dir / 'dashboard_view.json' }}</div>
+  </div>
+  <details class="mt-4 rounded-lg border border-slate-700/50 bg-bg/40">
+    <summary class="px-4 py-3 text-sm font-semibold text-slate-300 hover:text-white">
+      Why this benchmark may not provide a dashboard
+    </summary>
+    <div class="px-4 pb-4 text-sm text-slate-400">
+      Benchmark dashboards are optional: benchmarks can opt out, older runs may predate dashboard artifacts, and live runs may not have written a final view yet.
+    </div>
+  </details>
+</div>
+{% else %}
+
+{% for section in view.sections %}
+  {% set kind = section.kind %}
+  <div class="bg-surface rounded-xl p-6 border border-slate-700/50 mb-6">
+    {% if section.title %}
+    <h2 class="text-lg font-semibold text-white">{{ section.title }}</h2>
+    {% endif %}
+    {% if section.subtitle %}
+    <p class="text-slate-400 text-sm mt-1">{{ section.subtitle }}</p>
+    {% endif %}
+
+    {% if kind == "summary" %}
+      <div class="mt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {% for stat in section.stats %}
+        <div class="bg-slate-900/40 border border-slate-700/40 rounded-lg px-4 py-3"
+             {% if stat.hint %}title="{{ stat.hint }}"{% endif %}>
+          <div class="text-xs uppercase tracking-wider text-slate-400">{{ stat.label }}</div>
+          <div class="text-lg font-semibold text-slate-100 mt-1 font-mono">{{ stat.value }}</div>
+          {% if stat.hint %}
+          <div data-dashboard-stat-hint="{{ stat.label }}" class="mt-2 text-[11px] leading-tight text-slate-500">
+            {{ stat.hint }}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+
+    {% elif kind == "table" %}
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs" data-dashboard-controls>
+        <input data-dashboard-search
+               class="w-full max-w-sm rounded border border-slate-700 bg-bg px-2 py-1.5 text-slate-200"
+               placeholder="Filter this table">
+        <select data-dashboard-status-filter
+                class="rounded border border-slate-700 bg-bg px-2 py-1.5 text-slate-200">
+          <option value="all">All statuses</option>
+          <option value="stopped">Stopped</option>
+          <option value="failed">Failed</option>
+          <option value="completed">Completed</option>
+          <option value="running">Running</option>
+        </select>
+        <button type="button"
+                data-dashboard-failures-first
+                data-dashboard-active="false"
+                class="rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5 text-slate-200 hover:bg-slate-800">
+          Failures first
+        </button>
+      </div>
+      <div class="mt-4 overflow-x-auto">
+        <table class="min-w-full text-sm" data-dashboard-table>
+          <thead>
+            <tr class="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-700/50">
+              {% for col in section.columns %}
+              <th class="px-3 py-2 {% if col.align == 'right' %}text-right{% elif col.align == 'center' %}text-center{% endif %}">
+                <button type="button"
+                        data-dashboard-sort="{{ col.key }}"
+                        data-dashboard-sort-dir="none"
+                        {% if col.hint %}title="{{ col.hint }}"{% endif %}
+                        class="inline-flex flex-col gap-0.5 text-slate-300 hover:text-white {% if col.align == 'right' %}items-end{% elif col.align == 'center' %}items-center{% else %}items-start{% endif %}">
+                  <span class="inline-flex items-center gap-1">
+                    <span>{{ col.label }}</span>
+                    {% if col.unit %}<span class="text-[10px] normal-case tracking-normal text-slate-500">{{ col.unit }}</span>{% endif %}
+                    <span class="sr-only">sort</span>
+                  </span>
+                  {% if col.hint %}
+                  <span class="max-w-44 text-[10px] font-normal leading-tight normal-case tracking-normal text-slate-500">
+                    {{ col.hint }}
+                  </span>
+                  {% endif %}
+                </button>
+              </th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+            {% set row_status = dashboard_status_kind(row.get('status')) %}
+            <tr class="border-b border-l-2 border-slate-800/50
+                {% if row_status == 'failed' %}border-l-red-500/60 bg-red-500/[0.04] hover:bg-red-500/10
+                {% elif row_status == 'stopped' %}border-l-amber-400/60 bg-amber-500/[0.04] hover:bg-amber-500/10
+                {% elif row_status == 'running' %}border-l-sky-400/60 bg-sky-500/[0.04] hover:bg-sky-500/10
+                {% elif row_status == 'completed' %}border-l-green-500/35 hover:bg-green-500/[0.05]
+                {% else %}border-l-transparent hover:bg-slate-800/30{% endif %}"
+                data-dashboard-row
+                data-dashboard-row-status="{{ row_status }}"
+                data-dashboard-row-tone="{{ row_status }}"
+                data-dashboard-original-index="{{ loop.index0 }}">
+              {% for col in section.columns %}
+              {% set cell = row.get(col.key, "") %}
+              {% set cell_text = dashboard_cell_display(cell) %}
+              {% set cell_severity = dashboard_cell_attr(cell, 'severity') %}
+              {% set cell_unit = dashboard_cell_attr(cell, 'unit') or col.get('unit', '') %}
+              {% set cell_hint = dashboard_cell_attr(cell, 'hint') %}
+              <td class="px-3 py-2 font-mono text-slate-200 {% if col.align == 'right' %}text-right{% elif col.align == 'center' %}text-center{% endif %}"
+                  data-dashboard-cell-key="{{ col.key }}"
+                  data-dashboard-sort-value="{{ dashboard_cell_sort_value(cell) }}"
+                  {% if cell_severity %}data-dashboard-cell-severity="{{ cell_severity }}"{% endif %}
+                  {% if cell_unit %}data-dashboard-cell-unit="{{ cell_unit }}"{% endif %}
+                  {% if cell_hint %}title="{{ cell_hint }}"{% endif %}>
+                {% if col.key == 'status' %}
+                {% set status_kind = dashboard_status_kind(cell) %}
+                {% set status_label = dashboard_status_label(cell) %}
+                <span data-dashboard-status-kind="{{ status_kind }}"
+                      data-dashboard-status-label="{{ status_label }}"
+                      data-dashboard-status-raw="{{ cell_text }}"
+                      class="inline-flex rounded border px-2 py-0.5 text-xs font-medium
+                      {% if status_kind == 'failed' %}border-red-500/25 bg-red-500/10 text-red-200
+                      {% elif status_kind == 'stopped' %}border-amber-500/25 bg-amber-500/10 text-amber-200
+                      {% elif status_kind == 'running' %}border-sky-500/25 bg-sky-500/10 text-sky-200
+                      {% elif status_kind == 'completed' %}border-green-500/25 bg-green-500/10 text-green-200
+                      {% else %}border-slate-600 bg-slate-800 text-slate-300{% endif %}">
+                  {{ status_label }}
+                </span>
+                {% if cell_text and cell_text != status_label %}
+                <div class="mt-1 text-[11px] text-slate-500">{{ cell_text }}</div>
+                {% endif %}
+                {% else %}
+                {% if row.get('_href') and loop.first %}
+                <a href="{{ row.get('_href') }}" class="text-blue-300 hover:text-blue-200">{{ cell_text }}</a>
+                {% else %}
+                <span class="{% if cell_severity == 'failed' or cell_severity == 'error' %}text-red-200{% elif cell_severity == 'warning' or cell_severity == 'review' or cell_severity == 'stopped' %}text-amber-200{% elif cell_severity == 'success' or cell_severity == 'passed' %}text-green-200{% else %}text-slate-200{% endif %}">
+                  {{ cell_text }}
+                </span>
+                {% endif %}
+                {% if cell_hint %}
+                <div data-dashboard-cell-hint="{{ col.key }}" class="mt-1 max-w-48 text-[11px] font-sans leading-tight text-slate-500">
+                  {{ cell_hint }}
+                </div>
+                {% endif %}
+                {% endif %}
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+    {% elif kind == "note" %}
+      <pre class="mt-4 whitespace-pre-wrap text-sm text-slate-200 bg-slate-900/40 border border-slate-700/40 rounded p-4">{{ section.body }}</pre>
+
+    {% else %}
+      <pre class="mt-4 text-xs text-slate-400 bg-slate-900/40 border border-slate-700/40 rounded p-3 overflow-x-auto">{{ section | tojson(indent=2) }}</pre>
+    {% endif %}
+  </div>
+{% endfor %}
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function initDashboardTables() {
+  function severityRank(status) {
+    if (status === 'failed') return 0;
+    if (status === 'stopped') return 1;
+    if (status === 'running') return 2;
+    if (status === 'completed') return 3;
+    return 4;
+  }
+
+  function cellFor(row, key) {
+    return Array.from(row.children).find((cell) => cell.dataset.dashboardCellKey === key);
+  }
+
+  function sortValue(row, key) {
+    const cell = cellFor(row, key);
+    if (!cell) return '';
+    return (cell.dataset.dashboardSortValue || cell.textContent || '').trim();
+  }
+
+  function compareValues(a, b) {
+    const aNum = Number(String(a).replace(/,/g, ''));
+    const bNum = Number(String(b).replace(/,/g, ''));
+    if (Number.isFinite(aNum) && Number.isFinite(bNum)) return aNum - bNum;
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  document.querySelectorAll('[data-dashboard-table]').forEach((table) => {
+    const section = table.closest('.bg-surface');
+    const controls = section?.querySelector('[data-dashboard-controls]');
+    const search = controls?.querySelector('[data-dashboard-search]');
+    const statusFilter = controls?.querySelector('[data-dashboard-status-filter]');
+    const failuresFirst = controls?.querySelector('[data-dashboard-failures-first]');
+    const tbody = table.tBodies[0];
+    const rows = Array.from(tbody?.querySelectorAll('[data-dashboard-row]') || []);
+    const state = { sortKey: '', sortDir: 'asc', failuresFirst: false };
+
+    function apply() {
+      const q = (search?.value || '').trim().toLowerCase();
+      const wantedStatus = statusFilter?.value || 'all';
+      const ordered = rows.slice().sort((a, b) => {
+        if (state.failuresFirst) {
+          const rankDelta = severityRank(a.dataset.dashboardRowStatus) -
+            severityRank(b.dataset.dashboardRowStatus);
+          if (rankDelta) return rankDelta;
+        }
+        if (state.sortKey) {
+          const valueDelta = compareValues(
+            sortValue(a, state.sortKey),
+            sortValue(b, state.sortKey),
+          );
+          if (valueDelta) return state.sortDir === 'desc' ? -valueDelta : valueDelta;
+        }
+        return Number(a.dataset.dashboardOriginalIndex || 0) -
+          Number(b.dataset.dashboardOriginalIndex || 0);
+      });
+
+      ordered.forEach((row) => {
+        const matchesText = !q || row.textContent.toLowerCase().includes(q);
+        const matchesStatus = wantedStatus === 'all' ||
+          row.dataset.dashboardRowStatus === wantedStatus;
+        row.classList.toggle('hidden', !(matchesText && matchesStatus));
+        tbody.appendChild(row);
+      });
+    }
+
+    search?.addEventListener('input', apply);
+    statusFilter?.addEventListener('change', apply);
+    failuresFirst?.addEventListener('click', () => {
+      state.failuresFirst = !state.failuresFirst;
+      failuresFirst.dataset.dashboardActive = String(state.failuresFirst);
+      failuresFirst.classList.toggle('border-amber-500/50', state.failuresFirst);
+      failuresFirst.classList.toggle('text-amber-100', state.failuresFirst);
+      apply();
+    });
+    table.querySelectorAll('[data-dashboard-sort]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const key = button.dataset.dashboardSort || '';
+        if (state.sortKey === key) {
+          state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sortKey = key;
+          state.sortDir = 'asc';
+        }
+        table.querySelectorAll('[data-dashboard-sort]').forEach((other) => {
+          other.dataset.dashboardSortDir = other === button ? state.sortDir : 'none';
+        });
+        apply();
+      });
+    });
+  });
+})();
+
+(function initDashboardFreshness() {
+  const root = document.querySelector('[data-dashboard-live-endpoint]');
+  if (!root || !window.cageLive) return;
+  const endpoint = root.dataset.dashboardLiveEndpoint;
+  const updatedEl = root.querySelector('[data-dashboard-last-updated]');
+  const stateEl = root.querySelector('[data-dashboard-freshness-state]');
+  const savedEl = root.querySelector('[data-dashboard-saved-count]');
+  const currentEl = root.querySelector('[data-dashboard-current-count]');
+  const staleBanner = document.querySelector('[data-dashboard-stale-banner]');
+
+  function renderFreshness(freshness) {
+    if (!freshness) return;
+    if (savedEl) savedEl.textContent = freshness.saved_count == null ? '-' : String(freshness.saved_count);
+    if (currentEl) currentEl.textContent = freshness.current_count == null ? '-' : String(freshness.current_count);
+    if (stateEl) {
+      const saved = freshness.saved_count == null ? '-' : freshness.saved_count;
+      const current = freshness.current_count == null ? '-' : freshness.current_count;
+      stateEl.textContent = `${freshness.stale ? 'Stale' : 'Fresh'}: saved ${saved}, current ${current}`;
+      stateEl.classList.toggle('border-amber-500/35', Boolean(freshness.stale));
+      stateEl.classList.toggle('text-amber-100', Boolean(freshness.stale));
+    }
+    if (staleBanner) staleBanner.classList.toggle('hidden', !freshness.stale);
+  }
+
+  window.cageLive.start({
+    endpoint,
+    intervalMs: root.dataset.dashboardMode === 'live' ? 3000 : 8000,
+    idleBackoffMs: 15000,
+    idleAfter: 2,
+    onTick: (payload) => {
+      if (updatedEl) updatedEl.textContent = 'just now';
+      renderFreshness(payload.freshness);
+    },
+  });
+})();
+</script>
+{% endblock %}

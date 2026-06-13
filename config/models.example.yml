@@ -1,0 +1,175 @@
+models:
+  # ======================================================================
+  #  CAGE model registry — example / template
+  # ======================================================================
+  #  Copy this file to `config/models.yml`, then fill in your endpoints:
+  #
+  #      cp config/models.example.yml config/models.yml
+  #
+  #  `config/models.yml` is gitignored — keep real keys there, never here.
+  #  Secrets are written as `${ENV_VAR}` refs and expanded at load time, so
+  #  the literal key never lives in any file on disk.
+  #
+  #  Each top-level key below is a model *id* — the name you pass to
+  #  `--model <id>` or list under `agents:` in project.yml. An id maps to ONE
+  #  upstream endpoint; CAGE routes every LLM call through its in-container
+  #  proxy to that endpoint, translating the wire protocol when the agent and
+  #  the endpoint disagree.
+  #
+  # ----------------------------------------------------------------------
+  #  FIELDS
+  # ----------------------------------------------------------------------
+  #  Required
+  #    provider   Wire-protocol family. Decides how CAGE talks to the endpoint:
+  #                 openai | vllm | sglang   -> OpenAI Chat Completions protocol
+  #                 anthropic (or any other) -> Anthropic Messages protocol
+  #               `vllm`/`sglang` additionally mark the endpoint as *self-hosted*
+  #               — the only kind eligible for `--wait-for-model` startup polling
+  #               (SaaS providers are assumed always up).
+  #    model      The model string sent upstream, i.e. the provider's own name.
+  #
+  #  Auth — pick the ONE style that fits the endpoint
+  #    api_key    A single key, normally an env ref e.g. ${OPENAI_API_KEY}.
+  #               This is the common case.
+  #    api_keys   A *pool* of keys for the same endpoint — several accounts /
+  #               quotas. When non-empty it OVERRIDES api_key, and CAGE rotates
+  #               across the pool to load-balance concurrent trials. Use this
+  #               INSTEAD of api_key only when you want to spread load over
+  #               multiple accounts. (Internally: pool = api_keys if set, else
+  #               [api_key].)
+  #    auth_source  ONLY for subscription / OAuth agents — Claude Code logged in
+  #               with a Max/Pro account instead of an API key. Points at a host
+  #               directory holding `.credentials.json` / `.claude.json`, which
+  #               CAGE copies into the agent container. In this mode base_url and
+  #               api_key are left empty. Almost no endpoint needs this — leave
+  #               it out entirely unless you actually run subscription mode.
+  #
+  #  Optional (have sensible defaults — omit unless you need to override)
+  #    base_url            Endpoint URL. Required for normal API / self-hosted
+  #                        endpoints; empty only in subscription (auth_source) mode.
+  #    agent_model_names   Per-agent override of `model`, for when a specific
+  #                        agent CLI expects a different launch name, e.g.
+  #                          agent_model_names: {claude_code: claude-opus-4-7[1m]}
+  #    timeout             Per-request timeout in seconds. Default: 360.
+  #    max_retries         Upstream retry attempts. Default: 2.
+  #    input_cost_per_1m   USD per 1M input tokens — for cost accounting only.
+  #    output_cost_per_1m  USD per 1M output tokens.  (Both unset => not tracked.)
+  #    extra_headers       Extra HTTP headers sent upstream, e.g. {X-Title: cage}.
+  #    max_context_size    The endpoint's REAL context window, in tokens. A model
+  #                        capability (not a per-run knob), so it lives here.
+  #                        Agents whose CLI can be told a window honour it —
+  #                        kimi_code and qwen_code (alias: context_window_size).
+  #                        Omit it and the agent CLI keeps its OWN default; CAGE
+  #                        never invents a number. NOTE: the Claude Code CLI has
+  #                        no knob for a custom window (it infers ~200k from the
+  #                        model id), so claude_code CANNOT honour this — a
+  #                        long-context model still caps ~200k under claude_code.
+  #    reserved_context_size  Tokens of output headroom an agent keeps free below
+  #                        max_context_size before it auto-compacts. kimi_code only.
+  #    context_window_size  Accepted alias for max_context_size (qwen naming).
+  # ======================================================================
+
+  # --- OpenAI-protocol SaaS, single key --------------------------------
+  gpt-5.5:
+    provider: openai
+    model: gpt-5.5
+    base_url: https://api.openai.com/v1
+    api_key: ${OPENAI_API_KEY}
+    timeout: 3600
+    # Cost accounting is optional; set real numbers to track $ per run:
+    # input_cost_per_1m: 1.25
+    # output_cost_per_1m: 10.0
+
+  # --- Multi-account key POOL (use api_keys, not api_key) ---------------
+  #     CAGE rotates trials across these keys to spread quota/load.
+  openai-example:
+    provider: openai
+    model: gpt-5.5
+    base_url: https://api.openai.com/v1
+    api_keys:
+      - ${OPENAI_API_KEY}
+      - ${OPENAI_API_KEY_2}
+
+  # --- Self-hosted vLLM (OpenAI protocol, --wait-for-model eligible) ----
+  vllm-example:
+    provider: vllm
+    model: local-model
+    base_url: http://127.0.0.1:8000/v1
+    api_key: ${VLLM_API_KEY}   # self-hosted servers often accept any/empty key
+    # Declare the model's real context window so kimi_code / qwen_code size their
+    # auto-compaction to it instead of a CLI default. Omit ⇒ the CLI default
+    # stands; CAGE will not invent one. (claude_code can't use this — see the
+    # FIELDS note above: the Claude Code CLI has no custom-window knob.)
+    # max_context_size: 262144
+    # reserved_context_size: 20000      # output headroom kept free (kimi_code)
+
+  # --- Anthropic SaaS, single key --------------------------------------
+  claude-opus:
+    provider: anthropic
+    model: claude-opus-4-7
+    base_url: https://api.anthropic.com
+    api_key: ${ANTHROPIC_API_KEY}
+    timeout: 3600
+
+  # --- Anthropic subscription / OAuth — the ONLY user of auth_source ----
+  #     No base_url / api_key: Claude Code logs in with a Max/Pro account and
+  #     CAGE copies the host credentials (dir below) into the container.
+  claude-opus-sub:
+    provider: anthropic
+    model: claude-opus-4-7
+    agent_model_names:
+      claude_code: claude-opus-4-7[1m]   # decorated launch name (e.g. [1m] = 1M context)
+    auth_source: ${CAGE_CLAUDE_AUTH_SOURCE}   # host dir with .credentials.json
+
+  # --- Anthropic-compatible 3rd party (custom base_url + agent name) ----
+  deepseek-v4-pro:
+    provider: anthropic
+    model: deepseek-v4-pro
+    agent_model_names:
+      claude_code: deepseek-v4-pro[1m]
+    base_url: https://api.deepseek.com/anthropic
+    api_key: ${DEEPSEEK_API_KEY}
+    timeout: 3600
+
+  # --- Self-hosted OpenAI-compatible server -----------------------------
+  local-openai-compatible:
+    provider: openai
+    model: local-model
+    base_url: http://127.0.0.1:8000/v1
+    api_key: ${LOCAL_MODEL_API_KEY}
+    timeout: 3600
+
+  glm-5.1:
+    provider: openai
+    model: GLM-5.1
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    api_key: ${GLM_API_KEY}
+    timeout: 3600
+
+  qwen3.5-397b-w8a8:
+    provider: vllm
+    model: qwen3.5-397b-w8a8
+    base_url: http://127.0.0.1:8000/v1
+    api_key: ${SII_API_KEY}
+    timeout: 3600
+
+  qwen3.6-max-preview:
+    provider: openai
+    model: qwen3.6-max-preview
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: ${QWEN_API_KEY}
+    timeout: 3600
+
+  qwen3.7-max:
+    provider: openai
+    model: qwen3.7-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: ${QWEN_API_KEY}
+    timeout: 3600
+
+  kimi-k2.6-cli:
+    provider: openai
+    model: kimi-k2.6
+    base_url: https://api.moonshot.cn/v1
+    api_key: ${KIMI_API_KEY}
+    timeout: 3600

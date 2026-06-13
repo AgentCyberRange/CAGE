@@ -1,0 +1,91 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+runs/
+references/
+.worktrees/
+worktrees/
+.cage*
+.claude/
+.omc/
+PLAN.md
+config/models.yml
+config/models.yaml
+config/*.local.yml
+config/*.local.yaml
+**/models.local.yml
+**/models.local.yaml
+
+# NFS temporary handles (appear when a file is deleted while still open)
+.nfs*
+**/.nfs*
+
+# Runtime-generated docker compose written by cage when launching benchmark targets
+**/docker-compose.runtime.*.yml
+
+# VitePress docs build artifacts
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
+# Python/package build artifacts
+build/
+dist/
+
+# Tool caches
+.ruff_cache/
+
+# Local virtualenvs and trace artifacts
+.venv/
+.trace/
+.traces/
+
+# Local runtime logs
+logs/
+
+# Benchmark run outputs and archived trial artifacts
+examples/*/RESULT_*/
+examples/*/archives/
+examples/*/.cage_runs/
+examples/*/logs/
+examples/*/cc_bos/logs/
+examples/*/cc_bos/result/
+
+# Model endpoints live ONLY in config/models.yml (Layer 3). Never let a
+# per-benchmark model registry leak into examples/.
+examples/*/models.yml
+
+# Local-only working benchmark dirs (kept on disk, never committed).
+examples/pentest_bench/
+examples/pentest_runtime/
+examples/hackworld/datasets/
+**/proxy/proxy.jsonl
+**/proxy/proxy.jsonl.gz
+**/proxy/tool_calls.jsonl
+**/runtime/target_logs_*.log
+**/runtime/target_logs_*.log.gz
+
+# Stray local tooling/tarballs — never commit
+/crane
+/gcr.tgz
+
+# Local-only run configs (real paths/endpoints) — never commit
+examples/*/local*.yml
+
+# CyberGym data resolves through gitignored symlinks under datasets/ so the
+# committed YAML stays generic (./datasets/<name>) while each machine points
+# them at its real, large, machine-specific copies. Never commit the links.
+examples/cybergym/datasets/payloads
+examples/cybergym/datasets/server-binary
+examples/cybergym/datasets/image-cache
+
+# Internal working/progress plans — never commit (may carry internal infra refs)
+docs/plans/
+
+# Local working/product dirs — large run outputs, tooling tarballs, scratch
+# reports. Never commit (e.g. .tools/ holds multi-GB image tarballs).
+/.tools/
+/artifacts/
+/asset/
+/reports/
