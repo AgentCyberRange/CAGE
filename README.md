@@ -168,7 +168,8 @@ post-exploitation tasks, hints may reveal topology or services:
 
 ### 6. Inspect and Resume runs:
 By default, cage run starts the browser inspector automatically. After the run completes, inspect the results in the browser.
-<img src="./docs/assets/inspector.png" width="400">
+
+<img src="./docs/assets/inspector.png" width="600">
 
 To continue a named run, pass the same --run-id with --resume:
 ```
