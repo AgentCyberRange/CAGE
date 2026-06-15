@@ -126,13 +126,15 @@ cage benchmark build web_exploit_bench --max-concurrent 4
 cage benchmark build post_exploit_bench --max-concurrent 4
 ```
 
-You can also build a single benchmark sample, which is useful for smoke tests or
-when you only need one target:
+You can also build a single benchmark sample, which is useful for smoke tests,
+or for retrying a specific target if it fails during a batch build:
 ```
 cage benchmark build web_exploit_bench --sample pb-comfyui
 cage benchmark build post_exploit_bench --sample pb-postexp-range-4
 ```
 > Note: Building agent images and benchmark targets can take a while, especially on the first run, since Docker images and target assets may need to be downloaded and built.
+> When many targets are built concurrently, **a small number of samples may fail** due to transient Docker, network, or resource issues. In
+> that case, rerun cage benchmark build with **--sample <sample-id>** to **rebuild the failed sample only**.
 
 ### 5. Run Evaluations
 Default full runs use the benchmark config as-is:
