@@ -267,7 +267,7 @@ def benchmark_check(
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Show benchmark-owned build targets and image tags without building.",
+    help="Show the build targets and image tags that would be built, without building them.",
 )
 @click.option(
     "--rebuild",
