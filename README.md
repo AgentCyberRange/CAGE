@@ -119,10 +119,18 @@ Build the agent images:
 cage agent build --agent codex --variant pentestenv
 cage agent build --agent claude_code --variant pentestenv
 ```
-Prebuild benchmark targets:
+
+Prebuild all benchmark targets:
 ```
 cage benchmark build web_exploit_bench --max-concurrent 4
 cage benchmark build post_exploit_bench --max-concurrent 4
+```
+
+You can also build a single benchmark sample, which is useful for smoke tests or
+when you only need one target:
+```
+cage benchmark build web_exploit_bench --sample pb-comfyui
+cage benchmark build post_exploit_bench --sample pb-postexp-range-4
 ```
 > Note: Building agent images and benchmark targets can take a while, especially on the first run, since Docker images and target assets may need to be downloaded and built.
 
