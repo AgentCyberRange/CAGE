@@ -57,7 +57,7 @@ safe to re-run.
 Prerequisites:
 
 ```bash
-pip install -U huggingface_hub   # provides the `hf` CLI
+uv pip install huggingface_hub   # provides the `hf` CLI
 hf auth login                    # only if the dataset is gated/private
 ```
 

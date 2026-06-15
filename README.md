@@ -99,7 +99,7 @@ git -C examples/agent_pentest_bench/datasets/post_exploit_bench lfs pull
 
 Install the Hugging Face CLI first if you have not already:
 ```bash
-pip install -U huggingface_hub
+uv pip install huggingface_hub
 ```
 
 Then use `scripts/fetch` to fetch the full WebExploitBench and PostExploitBench datasets:
