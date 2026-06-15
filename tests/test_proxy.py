@@ -314,6 +314,49 @@ class TestBuildOpenaiRequest:
         assert "tools" in payload
         assert payload["tools"][0]["type"] == "function"
 
+    def test_upstream_extra_body_injects_and_overrides(self):
+        # Registry-pinned inference config (e.g. Qwen nothink + sampling) is
+        # merged into the upstream payload and wins over what the CLI sent.
+        anthropic_req = {
+            "model": "qwen36-27b",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 32000,
+            "temperature": 1.0,
+        }
+        extra = {
+            "chat_template_kwargs": {"enable_thinking": False},
+            "temperature": 0.7,
+        }
+        payload, _, _ = _build_openai_request(
+            anthropic_req, modify_rules=[], upstream_extra_body=extra
+        )
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+        assert payload["temperature"] == 0.7  # config overrides the CLI's 1.0
+        assert payload["max_tokens"] == 32000  # untouched passthrough
+
+    def test_upstream_extra_body_absent_is_noop(self):
+        anthropic_req = {
+            "model": "claude-3",
+            "messages": [{"role": "user", "content": "Hi"}],
+        }
+        payload, _, _ = _build_openai_request(anthropic_req, modify_rules=[])
+        assert "chat_template_kwargs" not in payload
+
+    def test_upstream_extra_body_respects_output_cap(self):
+        # extra_body merge runs before the cap clamp, so the cap stays a ceiling.
+        anthropic_req = {
+            "model": "qwen36-27b",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 32000,
+        }
+        payload, _, _ = _build_openai_request(
+            anthropic_req,
+            modify_rules=[],
+            upstream_extra_body={"max_tokens": 50000},
+            max_output_tokens_cap=8000,
+        )
+        assert payload["max_tokens"] == 8000
+
 
 class TestContainerProxyStartup:
     def test_start_container_proxy_uses_configured_mounted_log_dir(self):

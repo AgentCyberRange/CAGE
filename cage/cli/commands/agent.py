@@ -369,6 +369,7 @@ def debug(
             max_cost=runtime_section.get("max_cost"),
             input_cost_per_1m=model.input_cost_per_1m,
             output_cost_per_1m=model.output_cost_per_1m,
+            upstream_extra_body=dict(model.upstream_extra_body or {}),
         )
         proxy = start_container_proxy(container, proxy_config)
         proxy_url = proxy.base_url

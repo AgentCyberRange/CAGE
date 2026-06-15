@@ -119,6 +119,11 @@ class ProxyInstanceConfig:
     # Extra headers injected onto every upstream request, overriding any
     # same-named header the agent CLI sent (see ``ModelConfig.extra_headers``).
     extra_headers: dict[str, str] = field(default_factory=dict)
+    # Extra body fields merged into the translated OpenAI/vLLM request,
+    # overriding same-named params the agent CLI sent (see
+    # ``ModelConfig.upstream_extra_body`` — e.g. Qwen ``chat_template_kwargs``
+    # / sampling). ``{}`` ⇒ nothing injected.
+    upstream_extra_body: dict[str, Any] = field(default_factory=dict)
     container_log_dir: str = ""
     logs_mounted: bool = False
     max_requests: int = -1  # -1 = unlimited; 0 rejects before the first request
@@ -360,6 +365,7 @@ def start_container_proxy(
         "request_timeout": config.request_timeout,
         "http_proxy": config.http_proxy,
         "extra_headers": {str(k): str(v) for k, v in (config.extra_headers or {}).items()},
+        "upstream_extra_body": dict(config.upstream_extra_body or {}),
         "trial_id": str(config.trial_id),
         "max_requests": config.max_requests,
         "max_input_tokens": config.max_input_tokens,
@@ -497,6 +503,7 @@ def start_proxy_instance(config: ProxyInstanceConfig) -> ProxyInstance:
                         modify_rules=list(config.modify_rules),
                         system_template=config.system_template,
                         max_output_tokens_cap=config.max_output_tokens_cap,
+                        upstream_extra_body=config.upstream_extra_body,
                     )
                     upstream_resp = self._forward_openai(openai_req)
                     anthropic_resp = _translate_response_openai_to_anthropic(

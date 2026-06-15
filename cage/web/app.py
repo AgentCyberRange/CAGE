@@ -1014,16 +1014,48 @@ def _format_prompt_levels(value: Any) -> str:
     return text if text.lower().startswith("l") else f"l{text}"
 
 
-def _format_max_rounds(value: Any) -> str:
+def _resolved_run_max_rounds(run_dir: Path) -> int | None:
+    """The per-trial round budget the engine actually resolved for this run.
+
+    ``runtime.max_rounds: -1`` means "defer to the benchmark/sample default";
+    the engine resolves it per trial and records the number in each trial's
+    ``meta.json`` (e.g. 150). Read the first recorded positive value back so the
+    run page can show the real budget instead of the ``-1`` sentinel.
+    Best-effort: returns None when no trial has recorded one yet.
+    """
+    trials_root = run_dir / "trials"
+    if not trials_root.is_dir():
+        return None
+    for meta_path in trials_root.glob("**/meta.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        rounds = meta.get("max_rounds") if isinstance(meta, dict) else None
+        if isinstance(rounds, int) and not isinstance(rounds, bool) and rounds > 0:
+            return rounds
+    return None
+
+
+def _format_max_rounds(value: Any, *, resolved: int | None = None) -> str:
+    # ``max_rounds: -1`` means "defer to the benchmark/sample default", which the
+    # engine resolves per trial (recorded in each trial's meta.json). Show that
+    # resolved number — the budget the agent actually ran under — instead of the
+    # raw ``-1`` sentinel. A non-deferring no-cap budget means the run ends on
+    # another condition (timeout / token budget) → "unlimited".
     if value is None:
-        return "benchmark default"
+        return "unlimited"
     try:
         rounds = int(value)
     except (TypeError, ValueError):
         return str(value)
-    if rounds <= 0:
-        return f"benchmark default (project.yml max_rounds={rounds})"
-    return str(rounds)
+    if rounds > 0:
+        return str(rounds)
+    if rounds == 0:
+        return "0"
+    if resolved and resolved > 0:
+        return f"{resolved} (benchmark default)"
+    return "unlimited"
 
 
 def _append_summary_row(rows: list[dict[str, str]], label: str, value: Any) -> None:
@@ -1094,10 +1126,19 @@ def _run_project_summary(
     )
 
     stop_conditions: list[dict[str, str]] = []
+    raw_max_rounds = _present_value(runtime, "max_rounds")
+    # Only walk the trials to recover the resolved budget when the run defers
+    # (max_rounds < 0); explicit counts render straight from config.
+    resolved_max_rounds = None
+    try:
+        if int(raw_max_rounds) < 0:
+            resolved_max_rounds = _resolved_run_max_rounds(run_dir)
+    except (TypeError, ValueError):
+        pass
     _append_summary_row(
         stop_conditions,
         "Max rounds",
-        _format_max_rounds(_present_value(runtime, "max_rounds")),
+        _format_max_rounds(raw_max_rounds, resolved=resolved_max_rounds),
     )
     timeout = _present_value(runtime, "timeout", "timeout_seconds")
     if timeout is not None:

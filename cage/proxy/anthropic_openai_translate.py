@@ -321,6 +321,7 @@ def _build_openai_request(
     modify_rules: list[ProxyModifyRule],
     system_template: str = "",
     max_output_tokens_cap: int | None = None,
+    upstream_extra_body: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str, str]:
     """Build OpenAI chat request from Anthropic request.
 
@@ -359,6 +360,13 @@ def _build_openai_request(
     for key in ("max_tokens", "temperature", "top_p", "top_k"):
         if key in anthropic_request and anthropic_request[key] is not None:
             payload[key] = anthropic_request[key]
+
+    if upstream_extra_body:
+        # Registry-pinned inference config (e.g. Qwen ``chat_template_kwargs``
+        # / sampling) overrides the same-named params the agent CLI sent. Runs
+        # before the cap clamp so ``max_output_tokens_cap`` stays a hard ceiling.
+        for key, value in upstream_extra_body.items():
+            payload[key] = value
 
     if max_output_tokens_cap is not None:
         requested = payload.get("max_tokens")

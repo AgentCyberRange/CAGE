@@ -51,7 +51,8 @@ eval:
     # 139 oss-fuzz), NOT the 3480-task arvo-external catalog — so most external
     # tasks have no binaries and image mode is the right default here.
     # binary_dir: ./datasets/server-binary
-    difficulty: level2
+    # level0 repo only · level1 +description · level2 +crash trace · level3 +patch.
+    difficulty: level1
     # The whole 3480-task catalog runs by default (images are cached for them).
     # Subset from the CLI with `--sample arvo_10012 ...` or cap with eval.limit.
     grading:

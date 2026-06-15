@@ -1784,7 +1784,7 @@ def test_run_detail_lists_pending_planned_trials_with_reason_status(tmp_path: Pa
     assert "Benchmark result" not in html
     assert "Task finished" in html
     assert "Agent execution exceeded the configured trial timeout" in html
-    assert "warning: 'bg-green-500/10 text-green-300 border-green-500/20'" in html
+    assert "warning: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20'" in html
     assert "success: 'bg-green-500/10 text-green-300 border-green-500/20'" in html
     assert "running: 'bg-sky-500/15 text-sky-300 border-sky-500/30'" in html
 
@@ -2040,12 +2040,13 @@ def test_run_detail_exposes_specific_audit_filter_presets(tmp_path: Path) -> Non
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert 'data-audit-preset="running"' in html
-    assert 'data-audit-preset="target-passed"' in html
     assert 'data-audit-preset="max-rounds"' in html
     assert 'data-audit-preset="timed-out"' in html
     assert 'data-summary-filter="failed"' in html
     assert 'data-audit-preset="failed"' in html
-    assert "Target passed" in html
+    # The "Target passed" filter chip + legend were removed as confusing.
+    assert "Target passed" not in html
+    assert 'data-audit-preset="target-passed"' not in html
     assert "Max rounds" in html
     assert "Timed out" in html
     assert "Failed" in html
@@ -2055,14 +2056,15 @@ def test_run_detail_exposes_specific_audit_filter_presets(tmp_path: Path) -> Non
     assert "Infra/model failures" not in html
     assert "All warnings" not in html
     assert "Live-check" not in html
-    assert 'data-audit-filter-help' in html
-    assert "Target passed means the target validator reported success." in html
-    assert "Max rounds means the agent stopped at the configured round budget." in html
-    assert "Failed includes model, target, tool, process, and nonzero-exit errors." in html
-    assert "Check target-passed or stopped trials" in html
+    # The filter-help legend was removed as confusing clutter.
+    assert 'data-audit-filter-help' not in html
+    assert "Target passed means the target validator reported success." not in html
+    assert "Max rounds means the agent stopped at the configured round budget." not in html
+    assert "Failed includes model, target, tool, process, and nonzero-exit errors." not in html
     assert "Review audit/warning trials" not in html
     assert "running: (kind) => kind === 'running'" in html
-    assert "'target-passed': (kind) => kind === 'live_success'" in html
+    # The target-passed filter preset was removed with its chip.
+    assert "'target-passed':" not in html
     assert "'timed-out': (kind, label)" in html
     assert "'max-rounds': (kind, label)" in html
 

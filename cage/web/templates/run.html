@@ -122,7 +122,6 @@
 
 <!-- Review/live status banner -->
 {% set running_count = trials | selectattr('info.running') | list | length %}
-{% set live_success_count = trials | selectattr('info.status_kind', 'equalto', 'live_success') | list | length %}
 {% set warning_count = trials | rejectattr('info.running') | selectattr('info.status_kind', 'equalto', 'warning') | list | length %}
 {% set failed_count = trials | rejectattr('info.running') | selectattr('info.status_kind', 'equalto', 'error') | list | length %}
 <div id="run-live-banner"
@@ -139,13 +138,6 @@
             class="rounded border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-200 hover:bg-sky-500/20"
             title="Show trials that are currently running.">
       <span data-live-counter="running">{{ running_count }}</span> Running
-    </button>
-    <button type="button"
-            data-audit-preset="target-passed"
-            data-summary-filter="target-passed"
-            class="rounded border border-green-500/25 bg-green-500/10 px-2 py-1 text-xs font-semibold text-green-200 hover:bg-green-500/20"
-            title="Show trials where the target validator reported success.">
-      <span data-live-counter="live_success">{{ live_success_count }}</span> Target passed
     </button>
     <span class="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200"
           title="Trials stopped by max rounds, timeouts, tool limits, or interruption.">
@@ -202,11 +194,6 @@
                 title="Show trials that are still running.">
           Running
         </button>
-        <button type="button" data-audit-preset="target-passed"
-                class="rounded border border-green-500/25 bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-200 hover:bg-green-500/20"
-                title="Show trials where the target validator reported success.">
-          Target passed
-        </button>
         <button type="button" data-audit-preset="max-rounds"
                 class="rounded border border-yellow-500/25 bg-yellow-500/10 px-3 py-1.5 text-xs font-semibold text-yellow-200 hover:bg-yellow-500/20"
                 title="Show trials that stopped at the configured round budget.">
@@ -229,10 +216,6 @@
         </button>
       </div>
     </div>
-    <p data-audit-filter-help class="max-w-5xl text-xs leading-5 text-slate-400">
-      Target passed means the target validator reported success. Max rounds means the agent stopped at the configured round budget.
-      Failed includes model, target, tool, process, and nonzero-exit errors.
-    </p>
 
     <div class="grid gap-3 md:grid-cols-4">
       <label class="text-xs uppercase tracking-wider text-slate-500">
@@ -334,7 +317,7 @@
               {% if status_kind == 'running' %}bg-sky-500/15 text-sky-300 border-sky-500/30
               {% elif status_kind == 'success' %}bg-green-500/10 text-green-300 border-green-500/20
               {% elif status_kind == 'live_success' %}bg-green-500/10 text-green-300 border-green-500/20
-              {% elif status_kind == 'warning' %}bg-green-500/10 text-green-300 border-green-500/20
+              {% elif status_kind == 'warning' %}bg-yellow-500/10 text-yellow-300 border-yellow-500/20
               {% elif status_kind == 'error' %}bg-red-500/10 text-red-300 border-red-500/20
               {% else %}bg-slate-700/50 text-slate-300 border-slate-600{% endif %}"
                   {% if status_kind == 'live_success' %}title="Target validator reported success. Open the trial for details."{% endif %}>
@@ -453,7 +436,6 @@ function renderSelectedTrialTags() {
 
 const AUDIT_PRESETS = {
   running: (kind) => kind === 'running',
-  'target-passed': (kind) => kind === 'live_success',
   'max-rounds': (kind, label) => kind === 'warning' && normalizeAuditLabel(label).includes('max rounds'),
   'timed-out': (kind, label) => {
     const text = normalizeAuditLabel(label);
@@ -463,7 +445,6 @@ const AUDIT_PRESETS = {
 };
 const AUDIT_PRESET_LABELS = {
   running: 'running',
-  'target-passed': 'target passed',
   'max-rounds': 'max rounds',
   'timed-out': 'timed out',
   failed: 'failed',
@@ -592,7 +573,7 @@ applyTrialFilters();
     running: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
     success: 'bg-green-500/10 text-green-300 border-green-500/20',
     live_success: 'bg-green-500/10 text-green-300 border-green-500/20',
-    warning: 'bg-green-500/10 text-green-300 border-green-500/20',
+    warning: 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20',
     error: 'bg-red-500/10 text-red-300 border-red-500/20',
     pending: 'bg-slate-700/50 text-slate-300 border-slate-600',
   };
@@ -668,7 +649,7 @@ applyTrialFilters();
 
   function patchSummary(summary) {
     if (!summary) return;
-    for (const key of ['running', 'completed', 'live_success', 'warnings', 'failed', 'total']) {
+    for (const key of ['running', 'completed', 'warnings', 'failed', 'total']) {
       const el = banner.querySelector(`[data-live-counter="${key}"]`);
       if (el && summary[key] != null) setText(el, summary[key]);
     }

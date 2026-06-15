@@ -57,6 +57,47 @@ class ModelConfig:
         return "anthropic"
 
     @property
+    def upstream_extra_body(self) -> dict[str, Any]:
+        """Per-request body fields to merge into an OpenAI/vLLM upstream call.
+
+        Lets a registry entry pin inference knobs the agent CLI cannot express
+        itself — e.g. Qwen's ``enable_thinking`` (only switchable via the
+        per-request ``chat_template_kwargs`` flag) or recommended sampling.
+        The proxy forwards these on the anthropic→openai translation path, so a
+        Claude-Code-driven run can talk to a vLLM model with a fixed inference
+        config. All keys are read from ``extra`` (where the registry routes any
+        field not in ``_KNOWN_FIELDS``); ``{}`` ⇒ nothing injected.
+
+        Sources, in increasing precedence:
+          - ``extra['extra_body']``        — raw passthrough dict
+          - sampling keys in ``extra``     — temperature/top_p/top_k/
+                                             presence_penalty/frequency_penalty
+          - ``extra['chat_template_kwargs']`` merged with the ``enable_thinking``
+            top-level shorthand (same key qwen-code honours).
+        """
+
+        extra = self.extra if isinstance(self.extra, dict) else {}
+        body: dict[str, Any] = {}
+        raw = extra.get("extra_body")
+        if isinstance(raw, dict):
+            body.update(raw)
+        for key in (
+            "temperature", "top_p", "top_k",
+            "presence_penalty", "frequency_penalty",
+        ):
+            if extra.get(key) is not None:
+                body[key] = extra[key]
+        template_kwargs: dict[str, Any] = {}
+        raw_kwargs = extra.get("chat_template_kwargs")
+        if isinstance(raw_kwargs, dict):
+            template_kwargs.update(raw_kwargs)
+        if extra.get("enable_thinking") is not None:
+            template_kwargs["enable_thinking"] = extra["enable_thinking"]
+        if template_kwargs:
+            body["chat_template_kwargs"] = template_kwargs
+        return body
+
+    @property
     def is_local_endpoint(self) -> bool:
         """True for self-hosted inference frameworks (vLLM / SGLang).
 

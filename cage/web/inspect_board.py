@@ -276,7 +276,20 @@ def ensure_inspector_board(
     existing = _read_registry(reg)
     if existing is not None:
         pid = int(existing.get("pid") or 0)
-        if Path(str(existing.get("root", ""))).resolve() == root_path and is_pid_alive(pid):
+        recorded_port = int(existing.get("port") or 0)
+        configured_port = int(web_config.port or 0)
+        # Reuse a cached managed board only when it still matches the *current*
+        # config. A registry left over from before a fixed port was pinned (or
+        # from a different configured port) records a stale, once-ephemeral port;
+        # blindly reusing it shadows the configured single port forever — e.g.
+        # keeps printing :44809 long after config pins :7777. When a fixed port
+        # is configured and the cached board sits on a different one, fall through
+        # and re-resolve: start_inspector_board then reuses the live listener on
+        # the fixed port (single-port policy). port==0 (pure ephemeral mode)
+        # keeps the old root+pid reuse behaviour unchanged.
+        port_matches = configured_port == 0 or recorded_port == configured_port
+        same_root = Path(str(existing.get("root", ""))).resolve() == root_path
+        if same_root and port_matches and is_pid_alive(pid):
             return _info_from_registry(existing, reg, started=False, alive=True)
 
     return start_inspector_board(root_path, web_config, reg=reg, log_path=log_path)

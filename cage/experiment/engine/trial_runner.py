@@ -1241,6 +1241,7 @@ def execute_trial(
                 request_timeout=run.proxy.request_timeout,
                 http_proxy=run.proxy.upstream_http_proxy,
                 extra_headers=dict(model.extra_headers or {}),
+                upstream_extra_body=dict(model.upstream_extra_body or {}),
                 container_log_dir=(
                     _container_trial_proxy_dir(trial_id) if proxy_logs_mounted else ""
                 ),

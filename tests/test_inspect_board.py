@@ -146,6 +146,52 @@ def test_ensure_inspector_board_reuses_alive_registry(tmp_path: Path, monkeypatc
     assert info.pid == 12345
 
 
+def test_ensure_inspector_board_ignores_registry_on_stale_port(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    # Regression: a registry left over from before a fixed port was pinned records
+    # a once-ephemeral port (e.g. 44809). With config now pinning 7777, that cached
+    # board must NOT be reused — it would shadow the single port forever. The board
+    # must fall through to the single-port reuse path and land on 7777.
+    from cage.web.inspect_board import ensure_inspector_board, registry_path
+
+    root = tmp_path / "bench"
+    root.mkdir()
+    registry = registry_path(root)
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "pid": 99999,
+                "root": str(root.resolve()),
+                "host": "0.0.0.0",
+                "port": 44809,  # stale ephemeral port from before 7777 was pinned
+                "url": "http://0.0.0.0:44809",
+                "log_path": str(root / ".cage" / "inspect.log"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("cage.web.inspect_board.is_pid_alive", lambda _pid: True)
+    # 7777 is held by a live standing inspector → single-port reuse should win.
+    monkeypatch.setattr("cage.web.inspect_board.port_is_free", lambda _h, _p: False)
+    monkeypatch.setattr(
+        "cage.web.inspect_board.find_listening_pid", lambda _p, _h=None: 63571
+    )
+
+    info = ensure_inspector_board(
+        root,
+        WebInspectorConfig(host="0.0.0.0", port=7777),
+        mode="on",
+        interactive=True,
+    )
+
+    assert info.started is False  # reused the standing 7777 board, no new spawn
+    assert info.port == 7777
+    assert info.pid == 63571
+    assert info.url == "http://0.0.0.0:7777"
+
+
 def test_ensure_inspector_board_starts_background_process(
     tmp_path: Path, monkeypatch,
 ) -> None:

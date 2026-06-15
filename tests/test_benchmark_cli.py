@@ -1592,7 +1592,7 @@ def test_agent_list_shows_release_agents_without_internal_state_paths() -> None:
     assert "claude_code" in result.output
     assert "qwen_code" in result.output
     assert "kimi_code" in result.output
-    assert "cage/codex:latest" in result.output
+    assert "pursu1ng/cage-images:codex-latest" in result.output
     assert "cage/codex:pentestenv" in result.output
     assert "Use with: cage run <benchmark> --agent <runner> --model <model-id>" in result.output
     assert "Stable --agent values: codex, claude_code, qwen_code, kimi_code" in result.output

@@ -19,7 +19,7 @@ from cage.sandbox.exec import ExecResult
 class CodexAgent(AgentType):
     name = "codex"
     state_paths = [".codex"]
-    default_image = "cage/codex:latest"
+    default_image = "pursu1ng/cage-images:codex-latest"
     dockerfile = "docker/codex.Dockerfile"
 
     def install_command(self, version: str = "latest") -> str:

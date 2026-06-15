@@ -1029,6 +1029,7 @@ def _build_openai_request(
     *,
     system_template: str = "",
     max_output_tokens_cap: int | None = None,
+    upstream_extra_body: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str, str]:
     messages: list[dict[str, Any]] = []
     system_content = _normalize_content(anthropic_request.get("system", ""))
@@ -1064,6 +1065,13 @@ def _build_openai_request(
     for key in ("max_tokens", "temperature", "top_p", "top_k"):
         if key in anthropic_request and anthropic_request[key] is not None:
             payload[key] = anthropic_request[key]
+
+    if upstream_extra_body:
+        # Registry-pinned inference config (e.g. Qwen ``chat_template_kwargs``
+        # / sampling) overrides the same-named params the agent CLI sent. Runs
+        # before the cap clamp so ``max_output_tokens_cap`` stays a hard ceiling.
+        for key, value in upstream_extra_body.items():
+            payload[key] = value
 
     if max_output_tokens_cap is not None:
         requested = payload.get("max_tokens")
@@ -1466,6 +1474,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     body,
                     system_template=self.server.system_template,
                     max_output_tokens_cap=self.server.max_output_tokens_cap,
+                    upstream_extra_body=self.server.upstream_extra_body,
                 )
                 upstream_resp = self._forward_openai(openai_req)
                 anthropic_resp = _translate_response_openai_to_anthropic(
@@ -2136,6 +2145,9 @@ def run_proxy(config: dict[str, Any]) -> None:
     extra_headers = {
         str(k): str(v) for k, v in (config.get("extra_headers") or {}).items()
     }
+    upstream_extra_body = config.get("upstream_extra_body") or {}
+    if not isinstance(upstream_extra_body, dict):
+        upstream_extra_body = {}
     port = config.get("port", 8877)
     trial_id = config.get("trial_id", "unknown")
     log_dir = Path(config.get("log_dir", "/tmp/proxy_logs"))
@@ -2176,6 +2188,7 @@ def run_proxy(config: dict[str, Any]) -> None:
     httpd.trial_id = trial_id
     httpd.upstream_api_key = upstream_api_key
     httpd.upstream_base_url = upstream_base_url
+    httpd.upstream_extra_body = upstream_extra_body
     actual_port = httpd.server_address[1]
     logger.info("Cage proxy listening on 127.0.0.1:%d (trial=%s)", actual_port, trial_id)
 
