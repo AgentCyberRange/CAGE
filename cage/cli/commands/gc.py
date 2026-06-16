@@ -174,4 +174,7 @@ def gc(
         },
         "decisions": rows,
     }
-    click.echo(json.dumps(payload, indent=2))
+    # ensure_ascii=False so the human-readable ``reason`` strings render their
+    # punctuation (em dash, "<5m") directly instead of \uXXXX escapes. Still
+    # valid UTF-8 JSON for jq / downstream parsers.
+    click.echo(json.dumps(payload, indent=2, ensure_ascii=False))

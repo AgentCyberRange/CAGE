@@ -25,6 +25,7 @@ from cage.target.server.network_alloc import (
     release_reserved_project_local_subnet,
 )
 from cage.target.server.network_admin import (
+    capture_project_logs,
     resolve_service_inner_ips,
     self_heal_docker_network,
     summarize_project_containers,
@@ -55,7 +56,6 @@ from cage.target.server.network_debug import _build_entry_urls, build_network_de
 from cage.target.server.launch_workflow import (
     ensure_docker_cli_config_dir,
     load_env_file_vars,
-    pydantic_to_dict,
 )
 
 logger = logging.getLogger(__name__)
@@ -543,14 +543,21 @@ def _launch_challenge_impl(
             if inner_err:
                 raise RuntimeError(inner_err)
         except Exception as e:
+            # Capture full container logs BEFORE the failure_cleanup ExitStack
+            # purges the project on the way out (LIFO ``_purge_project_by_name``).
+            # Without this the real crash cause (e.g. a JVM cgroup-v2 NPE that
+            # kills the container on boot) is destroyed with the containers and
+            # only the symptom ("service X unreachable") survives. ``error`` is
+            # kept as a concise one-liner; the verbose per-service network dump
+            # is dropped — the orchestrator persists ``containers`` (the logs)
+            # as a trial artifact, so it must not be smashed into a truncated
+            # error string.
             details = {
                 "error": str(e),
                 "project_name": project_name,
-                "public_services": public_service_names,
-                "services": [pydantic_to_dict(svc) for svc in final_services],
-                "containers": summarize_project_containers(project_name),
+                "containers": capture_project_logs(project_name),
             }
-            logger.error(f"[LaunchVerify] Instance {chal_id} failed to become ready: {details}")
+            logger.error(f"[LaunchVerify] Instance {chal_id} failed to become ready: {e}")
             raise HTTPException(status_code=500, detail=details)
 
         failure_cleanup.pop_all()

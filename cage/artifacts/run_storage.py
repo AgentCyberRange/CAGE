@@ -67,6 +67,8 @@ STATE_PRE_DIRNAME = "state_pre"
 STATE_POST_DIRNAME = "state_post"
 PROXY_DIRNAME = "proxy"
 PROXY_LOG_FILENAME = "proxy.jsonl"
+TARGET_LOGS_DIRNAME = "target_logs"
+TARGET_LOGS_INDEX_FILENAME = "index.json"
 PROGRESS_FILENAME = "progress.json"
 DASHBOARD_FILENAME = "dashboard.json"
 RECORD_FILENAME = "record.json"
@@ -173,6 +175,10 @@ TRIAL_ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec(RECORD_FILENAME, "trial", "json",
         "Canonical per-trial durable record (status, artifacts, scoring refs).",
         "(via ExperimentArtifactReader)"),
+    ArtifactSpec(TARGET_LOGS_DIRNAME, "trial", "dir",
+        "Captured target container logs (one .log per service + index.json) — "
+        "audit trail for why a target stack came up or failed.",
+        "load_trial_target_logs"),
 )
 
 ALL_ARTIFACTS: tuple[ArtifactSpec, ...] = RUN_ARTIFACTS + TRIAL_ARTIFACTS
@@ -542,6 +548,51 @@ class RunStorage:
         (self.trial_dir(trial_id) / TASK_OUTPUT_FILENAME).write_text(
             json.dumps(output, ensure_ascii=False, indent=2),
             encoding="utf-8",
+        )
+
+    def save_target_logs(
+        self, trial_id: str, container_logs: list[dict[str, Any]]
+    ) -> None:
+        """Persist captured target container logs for audit.
+
+        Writes one ``<service>.log`` per container plus an ``index.json``
+        listing name/service/status/exit_code/error. Called on target launch
+        failure (logs come back in the 500 response body) and on teardown
+        (logs come back in the DELETE response), so both failed and successful
+        target stacks leave an auditable record. No-op for an empty list.
+        """
+        if not container_logs:
+            return
+        logs_dir = self.trial_dir(trial_id) / TARGET_LOGS_DIRNAME
+        logs_dir.mkdir(exist_ok=True)
+        index: list[dict[str, Any]] = []
+        used: set[str] = set()
+        for entry in container_logs:
+            if not isinstance(entry, dict):
+                continue
+            label = str(entry.get("service") or entry.get("name") or "container")
+            safe = re.sub(r"[^A-Za-z0-9_.-]", "_", label) or "container"
+            fname = safe
+            n = 1
+            while fname in used:
+                n += 1
+                fname = f"{safe}_{n}"
+            used.add(fname)
+            (logs_dir / f"{fname}.log").write_text(
+                str(entry.get("logs") or ""), encoding="utf-8"
+            )
+            index.append(
+                {
+                    "file": f"{fname}.log",
+                    "name": entry.get("name"),
+                    "service": entry.get("service"),
+                    "status": entry.get("status"),
+                    "exit_code": entry.get("exit_code"),
+                    "error": entry.get("error"),
+                }
+            )
+        (logs_dir / TARGET_LOGS_INDEX_FILENAME).write_text(
+            json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
     def save_trial_scores(

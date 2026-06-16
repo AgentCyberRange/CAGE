@@ -848,61 +848,6 @@ def test_run_page_renders_specific_trial_termination_reason(tmp_path: Path) -> N
     assert "Agent execution exceeded 300s" in html
 
 
-def test_trial_page_renders_specific_termination_reason(tmp_path: Path) -> None:
-    root = tmp_path
-    run_dir = root / "project" / ".cage_runs" / "agent:model" / "run-fixed"
-    trial_dir = run_dir / "trials" / "range1-L0"
-    _write_json(
-        run_dir / "dashboard.json",
-        {
-            "run_id": "run-fixed",
-            "experiment": "demo",
-            "status": "completed",
-            "agents": {
-                "agent:model": {
-                    "trials": [
-                        {
-                            "trial_id": "range1-L0",
-                            "exit_code": -1,
-                            "termination_reason": "execution_timeout",
-                            "termination_detail": "Agent execution exceeded 300s",
-                        }
-                    ]
-                }
-            },
-        },
-    )
-    _write_json(
-        trial_dir / "meta.json",
-        {
-            "trial_id": "range1-L0",
-            "trial_index": 0,
-            "sample_id": "range1",
-            "exit_code": -1,
-        },
-    )
-    _write_json(trial_dir / "task_output.json", {"output": "", "sample": {}})
-
-    app = create_app(root)
-    encoded = base64.urlsafe_b64encode(
-        str(trial_dir.resolve().relative_to(root.resolve())).encode()
-    ).decode()
-
-    response = app.test_client().get(f"/trial/{encoded}", follow_redirects=True)
-
-    assert response.status_code == 200
-    html = response.get_data(as_text=True)
-    assert "Execution:" in html
-    assert "Benchmark outcome:" in html
-    assert "Timed out" in html
-    assert "Agent execution exceeded 300s" in html
-    assert ">More termination evidence<" in html
-    evidence_index = html.index(">More termination evidence<")
-    evidence_prefix = html[evidence_index - 140:evidence_index]
-    assert "open>\n  <summary" not in evidence_prefix
-    assert "execution_timeout" in html
-
-
 def test_scan_runs_marks_run_running_from_trial_progress(tmp_path: Path) -> None:
     root = tmp_path
     run_dir = (
@@ -2240,8 +2185,9 @@ def test_trial_page_is_diagnosis_first_and_uses_current_attempt_label(tmp_path: 
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Trial diagnosis" in html
-    assert "Verdict" in html
+    # The "Why this trial ended" diagnosis overview card was removed.
+    assert "Why this trial ended" not in html
+    assert "Trial diagnosis" not in html
     assert "Current attempt" in html
     assert "● LIVE" not in html
     assert "Readable evidence" in html
@@ -2254,14 +2200,13 @@ def test_trial_page_is_diagnosis_first_and_uses_current_attempt_label(tmp_path: 
     assert 'data-trial-summary-field="duration"' in html
     assert 'data-trial-summary-field="tokens"' in html
     # Header is slimmed: the redundant context-nav rail and verbose
-    # "Token context"/"Trial updated" lines were removed (see Task 3). The
-    # diagnosis section still comes before the (now default-expanded) Prompt.
+    # "Token context"/"Trial updated" lines were removed (see Task 3).
     assert 'data-trial-context-rail' not in html
     assert "Token context:" not in html
-    assert html.index("Trial diagnosis") < html.index("Prompt")
+    assert ">Prompt<" in html
 
 
-def test_trial_overview_explains_why_trial_ended_before_raw_sections(tmp_path: Path) -> None:
+def test_trial_page_shows_scoring_after_final_output_without_termination_cards(tmp_path: Path) -> None:
     root = tmp_path
     run_dir = root / "project" / ".cage_runs" / "agent:model:stateless" / "run-fixed"
     trial_dir = run_dir / "trials" / "range1-L0"
@@ -2288,7 +2233,14 @@ def test_trial_overview_explains_why_trial_ended_before_raw_sections(tmp_path: P
     _write_json(trial_dir / "task_output.json", {"output": "partial", "sample": {}})
     _write_json(
         trial_dir / "scores" / "score.json",
-        {"score": {"value": 0.25, "explanation": "one host compromised"}},
+        {
+            "score": {
+                "value": 0.25,
+                "answer": "partial",
+                "explanation": "one host compromised",
+                "metadata": {"hosts_owned": 1, "flags": 0},
+            }
+        },
     )
 
     encoded = base64.urlsafe_b64encode(
@@ -2298,14 +2250,15 @@ def test_trial_overview_explains_why_trial_ended_before_raw_sections(tmp_path: P
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    why_index = html.index("Why this trial ended")
-    evidence_index = html.index(">More termination evidence<")
-    assert "Trial diagnosis" in html[why_index:]
-    assert "Timed out" in html[why_index:evidence_index]
-    assert "Agent execution exceeded 300s" in html[why_index:evidence_index]
-    assert "orchestrator" in html[why_index:evidence_index]
-    assert "score 0.25" in html[why_index:evidence_index]
-    assert why_index < evidence_index < html.index("Prompt")
+    # The diagnosis overview and termination-evidence cards were removed; the
+    # full scorer result is surfaced after Final Output instead.
+    assert "Why this trial ended" not in html
+    assert ">More termination evidence<" not in html
+    assert ">Final Output<" in html
+    assert "Scoring result" in html
+    assert html.index(">Final Output<") < html.index("Scoring result")
+    assert "one host compromised" in html  # explanation text
+    assert "hosts_owned" in html  # metadata evidence row
 
 
 def test_trial_page_splits_completed_execution_from_partial_benchmark_outcome(

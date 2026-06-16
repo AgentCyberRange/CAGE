@@ -13,6 +13,36 @@
   #json-panel.open { display: flex; }
   #json-panel pre { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; }
   .step-card.active-step { outline: 2px solid #3b82f6; outline-offset: -2px; }
+  /* Harness conversation structure */
+  .step-card { border-left-width: 3px; }
+  .step-card.conv-root { border-left-color: rgba(71,85,105,.6); }
+  .step-card.conv-subagent { border-left-color: rgba(168,85,247,.7); }
+  .step-card.conv-background { border-left-color: rgba(100,116,139,.4); }
+  .conv-badge { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; letter-spacing: .02em; }
+  .conv-badge.root { color: #94a3b8; background: rgba(71,85,105,.25); }
+  .conv-badge.subagent { color: #d8b4fe; background: rgba(168,85,247,.18); }
+  .conv-badge.background { color: #64748b; background: rgba(100,116,139,.15); }
+  .bg-call-line { font-size: 11px; color: #64748b; padding: 4px 14px; display: flex; align-items: center; gap: 8px; }
+  .compaction-divider { display: flex; align-items: center; gap: 10px; margin: 6px 0; color: #fbbf24; font-size: 14px; font-weight: 600; }
+  .compaction-divider::before, .compaction-divider::after { content: ""; flex: 1; height: 1px; background: repeating-linear-gradient(90deg, rgba(251,191,36,.5) 0 6px, transparent 6px 12px); }
+  .compaction-resume { font-size: 13px; color: #fbbf24; margin: 2px 0 6px; font-weight: 600; opacity: .9; }
+  .step-card.compaction-call-card { border-left-color: rgba(251,191,36,.8); }
+  .spawn-line { font-size: 11px; color: #d8b4fe; background: rgba(168,85,247,.10); border: 1px dashed rgba(168,85,247,.4); border-radius: 6px; padding: 4px 10px; margin-top: 6px; }
+  .spawn-line pre { color: #cbd5e1; }
+  .spawn-line summary { font-size: 11px; }
+  /* Subagent result folding back into the parent agent's context. */
+  .return-banner { font-size: 12px; background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.35); border-radius: 8px; padding: 6px 12px; margin: 8px 0; }
+  .return-banner-head { color: #6ee7b7; font-weight: 600; }
+  .return-banner-body { margin-top: 6px; padding: 8px 10px; background: black; border-radius: 6px; font-size: 11px; color: #d1fae5; white-space: pre-wrap; word-break: break-word; max-height: 22rem; overflow-y: auto; }
+  /* Subagent boundary banners: input at its first step, output at its last step. */
+  .subagent-entry { font-size: 12px; color: #d8b4fe; background: rgba(168,85,247,.08); border: 1px solid rgba(168,85,247,.3); border-radius: 8px; padding: 6px 12px; margin-bottom: 8px; }
+  .subagent-entry-head, .exit-banner-head { color: #d8b4fe; font-weight: 600; }
+  .exit-banner { font-size: 12px; background: rgba(168,85,247,.08); border: 1px solid rgba(168,85,247,.35); border-radius: 8px; padding: 6px 12px; margin: 8px 0; }
+  .boundary-body { margin-top: 6px; padding: 8px 10px; background: black; border-radius: 6px; font-size: 11px; color: #e9d5ff; white-space: pre-wrap; word-break: break-word; max-height: 26rem; overflow-y: auto; }
+  .subagent-entry summary, .exit-banner summary { font-size: 11px; }
+  .struct-card { font-size: 12px; }
+  .struct-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; background: rgba(30,41,59,.7); border: 1px solid rgba(71,85,105,.6); color: #cbd5e1; }
+  .struct-tree-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
   .ctx-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(30,41,59,.8); color: #cbd5e1; border: 1px solid rgba(71,85,105,.7); }
   .ctx-action-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 0 12px; position: sticky; top: 0; z-index: 2; background: #0c1222; }
   .ctx-action-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 5px 9px; border-radius: 6px; border: 1px solid #334155; color: #cbd5e1; background: #111827; }
@@ -242,46 +272,6 @@
   </div>
 </div>
 
-<section id="trial-overview" class="bg-surface rounded-xl border border-slate-700/50 mb-6 p-6">
-  <div class="mb-4">
-    <h2 class="text-lg font-semibold text-white">Why this trial ended</h2>
-    <p class="mt-1 text-sm text-slate-400">Trial diagnosis: status, stop reason, score, and the first place to look.</p>
-  </div>
-  <div class="grid gap-3 md:grid-cols-3">
-    <div class="rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3">
-      <div class="text-xs uppercase tracking-wider text-slate-500">Verdict</div>
-      <div class="mt-1 text-base font-semibold text-white">{{ trial_diagnosis.verdict }}</div>
-      <div class="mt-1 text-xs text-slate-500">{{ trial_diagnosis.action }}</div>
-    </div>
-    <div class="rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3">
-      <div class="text-xs uppercase tracking-wider text-slate-500">Stop reason</div>
-      <div class="mt-1 text-base font-semibold text-white">{{ trial_diagnosis.reason }}</div>
-      <div class="mt-1 truncate text-xs text-slate-500">{{ trial_diagnosis.detail or trial_diagnosis.status }}</div>
-    </div>
-    <div class="rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3">
-      <div class="text-xs uppercase tracking-wider text-slate-500">Score</div>
-      <div class="mt-1 text-base font-semibold text-white">{{ trial_diagnosis.score }}</div>
-      <div class="mt-1 text-xs text-slate-500">Execution and benchmark result are shown separately.</div>
-    </div>
-  </div>
-  {% if termination and termination.has_content %}
-  <div class="mt-3 rounded-lg border border-slate-700/60 bg-bg/40 px-4 py-3 text-sm">
-    <div class="text-xs uppercase tracking-wider text-slate-500">Termination detail</div>
-    <div class="mt-2 flex flex-wrap gap-x-6 gap-y-2">
-      {% if termination.reason %}
-      <div><span class="text-slate-400">Reason:</span> <code class="text-slate-200">{{ termination.reason }}</code>{% if termination.reason_label %}<span class="ml-2 text-slate-500">({{ termination.reason_label }})</span>{% endif %}</div>
-      {% endif %}
-      {% if termination.source %}
-      <div><span class="text-slate-400">Source:</span> <code class="text-slate-200">{{ termination.source }}</code></div>
-      {% endif %}
-    </div>
-    {% if termination.detail %}
-    <div class="mt-3 rounded border border-slate-700/50 bg-bg px-3 py-2 text-slate-200 whitespace-pre-wrap break-words">{{ termination.detail }}</div>
-    {% endif %}
-  </div>
-  {% endif %}
-</section>
-
 {% if live_check %}
 <div id="trial-evidence"></div>
 {% set verdict = live_check.verdict or {} %}
@@ -360,62 +350,6 @@
 <div id="trial-evidence"></div>
 {% endif %}
 
-{% if termination and termination.has_content %}
-<details class="bg-surface rounded-xl border border-slate-700/50 mb-6">
-  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">More termination evidence</summary>
-  <div class="px-6 pb-5 pt-2 space-y-4 text-sm">
-    <div class="flex flex-wrap gap-x-6 gap-y-2">
-      {% if termination.reason %}
-      <div><span class="text-slate-400">Reason:</span> <code class="text-slate-200">{{ termination.reason }}</code>{% if termination.reason_label %}<span class="ml-2 text-slate-500">({{ termination.reason_label }})</span>{% endif %}</div>
-      {% endif %}
-      {% if termination.source %}
-      <div><span class="text-slate-400">Source:</span> <code class="text-slate-200">{{ termination.source }}</code></div>
-      {% endif %}
-    </div>
-
-    {% if termination.detail %}
-    <div>
-      <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">Final Cause</div>
-      <div class="rounded-lg border border-slate-700/50 bg-bg px-4 py-3 text-slate-200 whitespace-pre-wrap break-words">{{ termination.detail }}</div>
-    </div>
-    {% endif %}
-
-    {% if termination.error_messages %}
-    <div>
-      <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">Recent Errors</div>
-      <div class="space-y-2">
-        {% for message in termination.error_messages %}
-        <div class="rounded-lg border border-slate-700/40 bg-bg/70 px-4 py-3 text-slate-300 whitespace-pre-wrap break-words">{{ message }}</div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    {% if termination.raw_detail and termination.raw_detail != termination.detail %}
-    <details class="rounded-lg border border-slate-700/50 bg-bg/40">
-      <summary class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200">Raw Termination Detail</summary>
-      <div class="px-4 pb-4">
-        <pre class="text-xs text-slate-300 whitespace-pre-wrap break-words leading-relaxed bg-bg rounded-lg p-4 max-h-80 overflow-y-auto">{{ termination.raw_detail }}</pre>
-      </div>
-    </details>
-    {% endif %}
-  </div>
-</details>
-{% endif %}
-
-<!-- Score details -->
-{% for metric, data in trial.scores.items() %}
-{% if data is mapping and data.get('explanation') %}
-<details class="bg-surface rounded-xl border border-slate-700/50 mb-6">
-  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">Score: {{ metric }}</summary>
-  <div class="px-6 pb-5 pt-2 text-sm space-y-2">
-    {% if data.get('answer') %}<div><span class="text-slate-400">Answer:</span> <span class="text-white">{{ data.answer }}</span></div>{% endif %}
-    <div><span class="text-slate-400">Explanation:</span> <span class="text-slate-300">{{ data.explanation }}</span></div>
-  </div>
-</details>
-{% endif %}
-{% endfor %}
-
 <!-- Files -->
 <details
   id="trial-files-panel"
@@ -463,11 +397,29 @@
   </div>
 </details>
 
+<!-- Scoring result: full scorer payload (value + answer + explanation + metadata) -->
+{% for metric, data in score_details.items() %}
+{% set is_map = data is mapping %}
+{% set sval = data.get('value') if is_map else data %}
+<details class="bg-surface rounded-xl border border-slate-700/50 mb-6" open>
+  <summary class="px-6 py-4 text-sm font-semibold text-slate-300 hover:text-white">
+    Scoring result — {{ metric }}
+    {% if sval is not none %}
+    <span class="ml-2 text-xs font-normal {% if sval is number and sval >= 0.7 %}text-green-300{% elif sval is number and sval > 0 %}text-yellow-300{% else %}text-red-300{% endif %}">{{ '%.2f'|format(sval) if sval is number else sval }}{% if is_map and data.get('answer') %} · {{ data.answer }}{% endif %}</span>
+    {% endif %}
+  </summary>
+  <div class="px-6 pb-5 pt-2">
+    <pre class="text-xs text-slate-200 whitespace-pre-wrap break-words leading-relaxed bg-bg rounded-lg p-4 max-h-96 overflow-y-auto font-mono">{{ score_details_pretty.get(metric, data | tojson(indent=2)) }}</pre>
+  </div>
+</details>
+{% endfor %}
+
 <!-- Trajectory -->
 {% if trial.has_trajectory %}
 <div id="trial-trajectory" class="mb-4">
   <h2 class="text-lg font-bold text-white">Trajectory</h2>
   <p id="trajectory-summary" class="mt-1 text-sm text-slate-400">Loading step count, token totals, and tool timeline...</p>
+  <div id="trajectory-structure" class="mt-2"></div>
 </div>
 
 <div id="trajectory-container" class="space-y-3 pb-24">
@@ -983,9 +935,48 @@ async function loadSteps(offset, limit) {
   );
   totalTokens = data.total_tokens || totalTokens || {};
   trajectorySummary = data.summary || trajectorySummary || {};
+  if (data.structure) trajectoryStructure = data.structure;
+  if (data.conversations) trajectoryConversations = data.conversations;
+  renderStructure();
   updateJumpMax();
   updateStatus();
   return data;
+}
+
+let trajectoryStructure = {};
+let trajectoryConversations = [];
+
+function renderStructure() {
+  const host = document.getElementById('trajectory-structure');
+  if (!host) return;
+  const s = trajectoryStructure || {};
+  const subs = (trajectoryConversations || []).filter(c => c.kind === 'subagent');
+  const hasStructure = (s.num_subagents || 0) > 0 || (s.num_compactions || 0) > 0 || (s.num_background_calls || 0) > 0;
+  if (!hasStructure) { host.innerHTML = ''; return; }
+  const chips = [];
+  chips.push(`<span class="struct-chip" title="Root agent decision rounds (excludes subagents, background and compaction calls)">🧠 root rounds <b class="text-white">${s.root_rounds ?? '?'}</b></span>`);
+  if (s.num_subagents) chips.push(`<span class="struct-chip" style="color:#d8b4fe">⑂ subagents <b>${s.num_subagents}</b> (depth ${s.max_depth || 1})</span>`);
+  if (s.num_compactions) chips.push(`<span class="struct-chip" style="color:#fbbf24">✂ compactions <b>${s.num_compactions}</b></span>`);
+  if (s.num_background_calls) chips.push(`<span class="struct-chip" style="color:#64748b">· background <b>${s.num_background_calls}</b></span>`);
+  let tree = '';
+  if (subs.length) {
+    tree = '<div class="mt-2 pl-1 border-l border-slate-700/50">' + subs.map(c => {
+      const indent = (c.depth || 1) * 14;
+      const inTok = (c.usage && c.usage.input_tokens) ? fmtTok(c.usage.input_tokens) : '0';
+      const spawnedAt = (c.spawned_by && c.spawned_by.parent_index != null) ? c.spawned_by.parent_index : null;
+      const retLink = (c.returns_at != null)
+        ? ` <span class="text-slate-600">→</span> <a href="#step-${c.returns_at}" class="text-emerald-400 hover:underline">returns step ${c.returns_at}</a>` : '';
+      const fromLabel = (spawnedAt != null) ? `step ${spawnedAt} <span class="text-slate-600">⑂→</span> ` : '';
+      return `<div class="struct-tree-row" style="padding-left:${indent}px">
+        <span class="conv-badge subagent">subagent:${esc(c.subagent_type || '?')}</span>
+        <span class="text-slate-400">${c.num_calls} calls · ${inTok} in${c.num_compactions ? ' · ✂'+c.num_compactions : ''}</span>
+        <span>${fromLabel}<a href="#step-${c.first_index}" class="text-blue-400 hover:underline">runs step ${c.first_index}</a>${retLink}</span>
+      </div>`;
+    }).join('') + '</div>';
+  }
+  host.innerHTML = `<div class="struct-card rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
+    <div class="flex flex-wrap items-center gap-2">${chips.join('')}</div>${tree}
+  </div>`;
 }
 
 function mergeSteps(steps) {
@@ -1036,11 +1027,84 @@ function renderNextBatch() {
   const end = Math.min(renderedCount + BATCH, allSteps.length);
   const fragment = document.createDocumentFragment();
   for (let i = renderedCount; i < end; i++) {
+    const step = allSteps[i];
+    const conv = step.conversation || {};
+    const kind = conv.kind || 'root';
+    const depth = conv.depth || 0;
+
+    // Compaction CALL: a real model call whose input is the full history + a
+    // "summarize the conversation" instruction and whose output (below) is the
+    // summary. It renders as a normal step card; this banner explains its role.
+    if (step.is_compaction_call) {
+      const div = document.createElement('div');
+      div.className = 'compaction-divider';
+      div.style.marginLeft = (depth * 24) + 'px';
+      div.innerHTML = `<span>✂ compaction call — the model summarizes the conversation (input ${fmtTok(step.tokens.in)} = full history + summarize prompt → output below = the summary, reused as the next call's context)</span>`;
+      fragment.appendChild(div);
+    }
+    // Continuation: the next call resumes from that summary (input collapsed).
+    if (step.is_compaction_resume) {
+      const div = document.createElement('div');
+      div.className = 'compaction-resume';
+      div.style.marginLeft = (depth * 24) + 'px';
+      div.innerHTML = `<span>↩ resumes from the compaction summary — context now ${fmtTok(step.tokens.in)} in</span>`;
+      fragment.appendChild(div);
+    }
+
+    // Subagent result folding back into this step's context: the literal point
+    // where a subagent's output enters the parent agent's prompt. The full text
+    // is shown expanded at the subagent's own last step, so this stays a concise
+    // marker linking back to it.
+    for (const ret of (step.returns || [])) {
+      const div = document.createElement('div');
+      div.className = 'return-banner';
+      div.style.marginLeft = (depth * 24) + 'px';
+      const fromLink = (ret.first_index != null)
+        ? ` <a href="#step-${ret.first_index}" class="text-violet-300 hover:underline">(produced at step ${ret.first_index})</a>` : '';
+      div.innerHTML = `<div class="return-banner-head">⤶ subagent:${esc(ret.subagent_type || '?')} (${esc(ret.conversation_id)}) output (${fmtTok(ret.result_len || 0)} chars) merged into context here${fromLink}</div>`;
+      fragment.appendChild(div);
+    }
+
+    // Background/auxiliary calls: a single demoted line, not a full card.
+    if (kind === 'background') {
+      const line = document.createElement('div');
+      line.id = `step-${step.index}`;
+      line.className = 'bg-call-line';
+      line.style.marginLeft = (depth * 24) + 'px';
+      const txt = (step.blocks.find(b => b.type === 'text') || {}).content || '';
+      line.innerHTML = `<span>·</span><span class="conv-badge background">background</span>
+        <span>step ${step.index} · ${fmtTok(step.tokens.in)} in / ${fmtTok(step.tokens.out)} out</span>
+        <span class="text-slate-600 truncate">${esc(String(txt).slice(0, 80))}</span>
+        <button type="button" data-context-step-index="${step.index}" class="ml-auto text-slate-600 hover:text-slate-300">JSON</button>`;
+      fragment.appendChild(line);
+      continue;
+    }
+
     const div = document.createElement('div');
-    div.id = `step-${allSteps[i].index}`;
-    div.className = 'step-card bg-surface rounded-xl border border-slate-700/50 overflow-hidden';
-    div.innerHTML = buildStepHTML(allSteps[i]);
+    div.id = `step-${step.index}`;
+    div.className = `step-card bg-surface rounded-xl border border-slate-700/50 overflow-hidden conv-${kind}`
+      + (step.is_compaction_call ? ' compaction-call-card' : '');
+    if (depth > 0) div.style.marginLeft = (depth * 24) + 'px';
+    div.innerHTML = buildStepHTML(step);
     fragment.appendChild(div);
+
+    // Subagent end point: render its produced output (expanded) right after its
+    // last step, so the start (input) and end (output) bound the subagent block.
+    for (const ex of (step.exits || [])) {
+      const eb = document.createElement('div');
+      eb.className = 'exit-banner';
+      eb.style.marginLeft = (depth * 24) + 'px';
+      const preview = ex.result_preview || '';
+      const retLink = (ex.returns_at != null)
+        ? ` <a href="#step-${ex.returns_at}" class="text-emerald-300 hover:underline">result returns to step ${ex.returns_at} ⤶</a>`
+        : ' <span class="text-slate-500">(no return captured — trial ended inside the subagent)</span>';
+      const body = preview
+        ? `<details open><summary class="cursor-pointer text-violet-300/80">↳ output it produced (${fmtTok(ex.result_len || preview.length)} chars)</summary>` +
+          `<pre class="boundary-body">${esc(preview)}${ex.result_truncated ? '\n…(truncated)' : ''}</pre></details>`
+        : '';
+      eb.innerHTML = `<div class="exit-banner-head">⑂ subagent:${esc(ex.subagent_type || '?')} (${esc(ex.conversation_id)}) ends here ·${retLink}</div>${body}`;
+      fragment.appendChild(eb);
+    }
   }
   container.appendChild(fragment);
   renderedCount = end;
@@ -1055,9 +1119,34 @@ async function renderAllRemaining() {
 
 function buildStepHTML(step) {
   const toolNames = step.blocks.filter(b => b.type === 'tool_use').map(b => b.name).join(', ');
+  const _conv = step.conversation || {};
+  const _kind = _conv.kind || 'root';
+  const convBadgeHTML = _kind === 'root' ? '' :
+    `<span class="conv-badge ${_kind}" title="conversation ${esc(_conv.id || '')} (depth ${_conv.depth || 0})">${_kind === 'subagent' ? 'subagent:' + esc(_conv.subagent_type || '?') : esc(_kind)}</span>`;
+  // When this step opens a subagent conversation, show where it was spawned from
+  // and where its result returns — so the delegation is navigable in both directions.
+  let subagentEntryHTML = '';
+  if (_kind === 'subagent') {
+    const me = (trajectoryConversations || []).find(c => c.id === _conv.id);
+    if (me && me.first_index === step.index) {
+      const from = (me.spawned_by && me.spawned_by.parent_index != null) ? me.spawned_by.parent_index : null;
+      const ret = (me.returns_at != null) ? me.returns_at : null;
+      const prompt = me.spawn_prompt || '';
+      const navLine = `<div class="subagent-entry-head">⑂ subagent <b>${esc(_conv.subagent_type || '?')}</b> (${esc(_conv.id || '')}) begins here — parent blocks until it returns` +
+        (from != null ? ` · spawned by <a href="#step-${from}" class="text-violet-300 hover:underline">step ${from}</a>` : '') +
+        (ret != null ? ` · result returns to <a href="#step-${ret}" class="text-emerald-300 hover:underline">step ${ret} ⤶</a>` : '') + `</div>`;
+      // Open by default: its starting context is the whole point of observing the start.
+      const promptBlock = prompt
+        ? `<details open><summary class="cursor-pointer text-violet-300/80">↳ starting context it received (${prompt.length} chars)</summary>` +
+          `<pre class="boundary-body">${esc(prompt.slice(0, 4000))}${prompt.length > 4000 ? '\n…(truncated)' : ''}</pre></details>`
+        : '';
+      subagentEntryHTML = `<div class="subagent-entry">${navLine}${promptBlock}</div>`;
+    }
+  }
   let html = `<div class="px-5 py-2.5 bg-slate-800/50 border-b border-slate-700/30 flex items-center justify-between">
     <div class="flex items-center gap-3">
       <span class="text-white font-bold text-sm">Step ${step.index}</span>
+      ${convBadgeHTML}
       <span class="text-slate-600 text-xs">|</span>
       <span class="text-xs text-slate-400">
         <span class="text-blue-300">${fmtTok(step.tokens.in)}</span> in
@@ -1076,6 +1165,7 @@ function buildStepHTML(step) {
   </div>`;
 
   html += `<div class="step-body p-4 space-y-2.5">`;
+  html += subagentEntryHTML;
   if (!step.blocks.length) {
     html += `<div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
       <div class="text-sm font-medium text-amber-200">No response content captured for this step.</div>
@@ -1086,6 +1176,18 @@ function buildStepHTML(step) {
     if (block.type === 'thinking') html += thinkingHTML(block.content);
     else if (block.type === 'text') html += textHTML(block.content);
     else if (block.type === 'tool_use') html += toolHTML(block);
+  }
+  for (const childId of (step.spawns || [])) {
+    const child = (trajectoryConversations || []).find(c => c.id === childId);
+    if (!child) continue;
+    const retLink = (child.returns_at != null)
+      ? ` · <a href="#step-${child.returns_at}" class="text-emerald-300 hover:underline">result returns at step ${child.returns_at} ⤶</a>` : '';
+    // The prompt body is shown expanded at the subagent's own first step, so the
+    // parent-side line stays a concise navigable handoff.
+    html += `<div class="spawn-line">↳ delegates to <b>subagent:${esc(child.subagent_type || '?')}</b> (${esc(childId)})
+      — ${child.num_calls} calls${child.num_compactions ? ', ✂'+child.num_compactions : ''}
+      · <a href="#step-${child.first_index}" class="text-violet-300 hover:underline">runs at step ${child.first_index} →</a>${retLink}
+      <span class="text-slate-500">· input shown at step ${child.first_index}</span></div>`;
   }
   html += `</div>`;
   return html;

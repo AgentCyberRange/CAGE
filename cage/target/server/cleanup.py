@@ -6,7 +6,10 @@ from cage.target.server.network_alloc import (
     release_octet_slot,
     release_reserved_project_local_subnet,
 )
-from cage.target.server.network_admin import remove_network_with_retry
+from cage.target.server.network_admin import (
+    capture_project_logs,
+    remove_network_with_retry,
+)
 from cage.target.server.server_state import (
     DOCKER_NETWORK,
     TARGET_SERVER_NAMESPACE,
@@ -99,8 +102,13 @@ def _unlink_runtime_compose(compose_path: Optional[Path]) -> None:
             pass
 
 
-def _cleanup_instance_impl(chal_id: str, run_id: Optional[str] = None):
-    """Force-clean a project's containers, networks, volumes, and tracked allocations."""
+def _cleanup_instance_impl(chal_id: str, run_id: Optional[str] = None) -> list[dict]:
+    """Force-clean a project's containers, networks, volumes, and tracked allocations.
+
+    Returns the captured container logs (one entry per container) so the
+    teardown endpoint can ship them back to the orchestrator for audit. Logs
+    are grabbed BEFORE the purge — once containers are removed they're gone.
+    """
     instance_key = run_id or chal_id
     update_running_instance(instance_key, lifecycle_state="cleanup")
     existing_instance = get_running_instance(instance_key)
@@ -112,6 +120,12 @@ def _cleanup_instance_impl(chal_id: str, run_id: Optional[str] = None):
     )
 
     logger.info(f"Cleaning up project: {project_name} ...")
+
+    captured_logs: list[dict] = []
+    try:
+        captured_logs = capture_project_logs(project_name)
+    except Exception as exc:
+        logger.warning(f"Failed to capture target logs for {project_name}: {exc}")
 
     _purge_compose_project_resources(project_name)
 
@@ -130,7 +144,9 @@ def _cleanup_instance_impl(chal_id: str, run_id: Optional[str] = None):
             _unlink_runtime_compose(Path(compose_path))
         logger.info(f"Instance {instance_key} removed from memory.")
 
+    return captured_logs
 
-def cleanup_instance(chal_id: str, run_id: Optional[str] = None):
+
+def cleanup_instance(chal_id: str, run_id: Optional[str] = None) -> list[dict]:
     with challenge_locks.get_lock(chal_id):
-        _cleanup_instance_impl(chal_id, run_id=run_id)
+        return _cleanup_instance_impl(chal_id, run_id=run_id)

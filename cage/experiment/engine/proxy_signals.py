@@ -308,22 +308,31 @@ def _last_proxy_error_text(proxy_jsonl_path: object) -> str:
 
 
 def _count_proxy_jsonl_budgeted_rounds(proxy_jsonl_path: object) -> int:
-    """Count successful agent-decision rounds in ``proxy.jsonl``.
+    """Count the **root agent's** decision rounds in ``proxy.jsonl``.
 
-    The proxy records all upstream attempts for audit, including failed
-    upstream responses and context-compaction bookkeeping calls. Only
-    successful non-compact responses are agent decision rounds and should
-    spend ``max_rounds``.
+    The proxy records every upstream call for audit, flat and interleaved:
+    failed attempts, context-compaction bookkeeping, the harness's own
+    background/auxiliary calls, and any subagents the root delegates to. Only
+    the *root* conversation's non-compaction turns are agent decisions that
+    spend ``max_rounds`` — a subagent's loop, a background title call, and a
+    compaction-continuation must not.
+
+    We reconstruct the conversation forest (see
+    :mod:`cage.proxy.conversations`) and return its root-only round count, so a
+    delegating trial is not mis-classified as having exhausted its round budget.
+    Codex's explicit ``/compact`` rewrites are dropped before reconstruction.
     """
     import json as _json
     from pathlib import Path as _Path
+
+    from cage.proxy.conversations import reconstruct_forest
 
     if not proxy_jsonl_path:
         return 0
     path = _Path(str(proxy_jsonl_path))
     if not path.is_file():
         return 0
-    count = 0
+    entries: list[dict] = []
     try:
         with path.open("r", encoding="utf-8", errors="replace") as f:
             for raw in f:
@@ -344,10 +353,12 @@ def _count_proxy_jsonl_budgeted_rounds(proxy_jsonl_path: object) -> int:
                     and openai_request.get("_proxy_compact_rewritten")
                 ):
                     continue
-                count += 1
+                entries.append(entry)
     except OSError:
         return 0
-    return count
+    if not entries:
+        return 0
+    return reconstruct_forest(entries).root_rounds
 
 
 def _proxy_usage_cost(entry: dict) -> float | None:

@@ -62,6 +62,7 @@ from .data import (
     load_run_history,
     load_trial,
     load_trial_activity,
+    load_trial_score_details,
     load_trial_step_context,
     load_trial_summary,
     load_trial_summary_cached,
@@ -2702,6 +2703,13 @@ def _render_trial_detail(trial_dir: Path):
         }]
     trial_diagnosis = _build_trial_diagnosis(trial_status, termination, trial)
     trial_outcome = _build_trial_benchmark_outcome(trial)
+    score_details = load_trial_score_details(trial_dir)
+    # Pretty-printed score payload, shown verbatim like the on-disk score file
+    # (ensure_ascii=False keeps real characters such as → instead of →).
+    score_details_pretty = {
+        metric: json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)
+        for metric, payload in score_details.items()
+    }
     token_context = _trial_token_context(run_dir, trial_dir, usage, dashboard=dashboard)
     return render_template(
         "trial.html",
@@ -2711,6 +2719,8 @@ def _render_trial_detail(trial_dir: Path):
         termination=termination,
         trial_diagnosis=trial_diagnosis,
         trial_outcome=trial_outcome,
+        score_details=score_details,
+        score_details_pretty=score_details_pretty,
         token_context=token_context,
         usage=usage,
         live_check=live_check,

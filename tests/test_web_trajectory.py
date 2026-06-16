@@ -16,10 +16,14 @@ def _write_jsonl(path: Path, entries: list[dict]) -> None:
     )
 
 
-def test_parse_trajectory_reads_only_window_for_paginated_requests(
+def test_parse_trajectory_caches_full_read_across_pages(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # Harness-structure reconstruction needs the whole stream (a subagent's
+    # parent edge can point anywhere), so the first parse reads the full log;
+    # subsequent page fetches of the same (unchanged) log are served from the
+    # (path, mtime, size)-keyed cache without re-opening the file.
     proxy_jsonl = tmp_path / "proxy.jsonl"
     _write_jsonl(
         proxy_jsonl,
@@ -42,42 +46,28 @@ def test_parse_trajectory_reads_only_window_for_paginated_requests(
             for idx in range(120)
         ],
     )
+    from cage.web.data import _TRAJECTORY_SOURCE_CACHE
+
+    _TRAJECTORY_SOURCE_CACHE.clear()
+
+    # First page: cold cache, full read is allowed.
+    first = parse_trajectory(proxy_jsonl, offset=0, limit=2)
+    assert [step["index"] for step in first["steps"]] == [0, 1]
+    assert first["total_steps"] == 120
+    assert first["has_more"] is True
+
+    # Second page of the unchanged log must not re-open the file.
     original_open = Path.open
 
-    class GuardedFile:
-        def __init__(self, handle):
-            self.handle = handle
-            self.lines_read = 0
-
-        def __enter__(self):
-            self.handle.__enter__()
-            return self
-
-        def __exit__(self, *args):
-            return self.handle.__exit__(*args)
-
-        def __iter__(self):
-            for line in self.handle:
-                self.lines_read += 1
-                if self.lines_read > 12:
-                    raise AssertionError(
-                        "paginated trajectory read past the request window"
-                    )
-                yield line
-
     def guarded_open(path: Path, *args, **kwargs):
-        handle = original_open(path, *args, **kwargs)
         if path == proxy_jsonl:
-            return GuardedFile(handle)
-        return handle
+            raise AssertionError("paginated trajectory re-read a cached log")
+        return original_open(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", guarded_open)
-
-    data = parse_trajectory(proxy_jsonl, offset=0, limit=2)
-
-    assert [step["index"] for step in data["steps"]] == [0, 1]
-    assert data["has_more"] is True
-    assert data["total_steps_known"] is False
+    second = parse_trajectory(proxy_jsonl, offset=2, limit=2)
+    assert [step["index"] for step in second["steps"]] == [2, 3]
+    assert second["total_steps"] == 120
 
 
 def test_parse_trajectory_includes_operator_summary(tmp_path: Path) -> None:

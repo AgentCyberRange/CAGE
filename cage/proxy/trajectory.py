@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from cage.proxy.conversations import reconstruct_forest
 from cage.proxy.usage import extract_entry_usage
 
 
@@ -261,27 +262,89 @@ def generate_traj(proxy_jsonl_path: Path, output_path: Path) -> None:
                 if tid:
                     tool_results_by_id[tid] = str(msg.get("content", ""))
 
+    # Reconstruct the harness conversation structure so the projection shows the
+    # delegation tree (root vs subagents), compaction boundaries, and demotes the
+    # harness's own background calls instead of flattening everything into one
+    # misleading linear stream.
+    forest = reconstruct_forest(entries)
+    conv_by_id = {c.id: c for c in forest.conversations}
+    compaction_call_indices = {i for c in forest.conversations for i in c.compaction_calls}
+    compaction_resume_indices = {i for c in forest.conversations for i in c.compaction_at}
+    spawns_by_index: dict[int, list[str]] = {}
+    returns_by_index: dict[int, list[str]] = {}
+    for conv in forest.conversations:
+        if conv.spawned_by and conv.spawned_by.get("parent_index") is not None:
+            spawns_by_index.setdefault(int(conv.spawned_by["parent_index"]), []).append(conv.id)
+        if conv.returns_at is not None:
+            returns_by_index.setdefault(int(conv.returns_at), []).append(conv.id)
+    cumulative_by_conv: dict[str, dict[str, int]] = {}
+
     parts: list[str] = []
-    cumulative_in = 0
-    cumulative_out = 0
-    cumulative_reasoning = 0
+    s = forest.structure
+    parts.append("#" * 72)
+    parts.append(
+        f"# Harness structure: root_rounds={forest.root_rounds}  "
+        f"subagents={s['num_subagents']}  background_calls={s['num_background_calls']}  "
+        f"compactions={s['num_compactions']}  max_depth={s['max_depth']}  "
+        f"(raw success calls={len(entries)})"
+    )
+    parts.append("#" * 72)
+    parts.append("")
 
     for step_idx, entry in enumerate(entries):
         usage = extract_entry_usage(entry)
         in_tok = usage["input_tokens"]
         out_tok = usage["output_tokens"]
         reason_tok = usage["reasoning_tokens"]
-        cumulative_in += in_tok
-        cumulative_out += out_tok
-        cumulative_reasoning += reason_tok
 
-        parts.append("=" * 72)
+        conv = forest.conversation_of(step_idx)
+        conv_id = conv.id if conv else "?"
+        kind = conv.kind if conv else "root"
+        depth = conv.depth if conv else 0
+        indent = "    " * depth
+
+        # Background calls are the harness's own auxiliary blips — collapse them.
+        if kind == "background":
+            text = ""
+            for block in _extract_blocks(entry, tool_results_by_id):
+                if block.get("type") == "text":
+                    text = str(block.get("content") or "").strip().replace("\n", " ")[:60]
+                    break
+            parts.append(f"{indent}· [background call] in={in_tok} out={out_tok}  {text}")
+            continue
+
+        cum = cumulative_by_conv.setdefault(conv_id, {"in": 0, "out": 0, "reasoning": 0})
+        cum["in"] += in_tok
+        cum["out"] += out_tok
+        cum["reasoning"] += reason_tok
+
+        if step_idx in compaction_call_indices:
+            parts.append("")
+            parts.append(f"{indent}{'✂' * 36}")
+            parts.append(f"{indent}✂ COMPACTION CALL — model summarizes the conversation "
+                         f"(input={in_tok}: full history + summarize prompt; output below = the summary)")
+            parts.append(f"{indent}{'✂' * 36}")
+        if step_idx in compaction_resume_indices:
+            parts.append(f"{indent}↩ resumes from the compaction summary (context_in now {in_tok})")
+
+        # A subagent's result folds back into the parent's context at this step.
+        for child_id in returns_by_index.get(step_idx, []):
+            child = conv_by_id.get(child_id)
+            if child:
+                parts.append(
+                    f"{indent}  ⤶ subagent:{child.subagent_type or '?'} ({child_id}) "
+                    f"result merged into context here (ran at step "
+                    f"{child.call_indices[0] if child.call_indices else '?'})"
+                )
+
+        tag = kind if kind != "subagent" else f"subagent:{conv.subagent_type or '?'}"
+        parts.append(f"{indent}{'=' * (72 - len(indent))}")
         parts.append(
-            f"  Step {step_idx}  |  "
+            f"{indent}  Step {step_idx}  [{conv_id} {tag}]  |  "
             f"context_in={in_tok}  out={out_tok}  reasoning={reason_tok}  |  "
-            f"cumulative: in={cumulative_in} out={cumulative_out}"
+            f"conv cumulative: in={cum['in']} out={cum['out']}"
         )
-        parts.append("=" * 72)
+        parts.append(f"{indent}{'=' * (72 - len(indent))}")
 
         for block in _extract_blocks(entry, tool_results_by_id):
             btype = block.get("type")
@@ -289,32 +352,55 @@ def generate_traj(proxy_jsonl_path: Path, output_path: Path) -> None:
                 text = str(block.get("content") or "").strip()
                 if text:
                     parts.append("")
-                    parts.append("--- thinking ---")
-                    parts.append(text)
+                    parts.append(f"{indent}--- thinking ---")
+                    parts.append(_indent_text(text, indent))
             elif btype == "text":
                 text = str(block.get("content") or "").strip()
                 if text:
                     parts.append("")
-                    parts.append("--- text ---")
-                    parts.append(text)
+                    parts.append(f"{indent}--- text ---")
+                    parts.append(_indent_text(text, indent))
             elif btype == "tool_use":
+                name = block.get("name", "unknown")
                 parts.append("")
-                parts.append(f">>> tool: {block.get('name', 'unknown')}")
+                parts.append(f"{indent}>>> tool: {name}")
                 tool_input = block.get("input") or {}
                 if isinstance(tool_input, dict):
                     for k, v in tool_input.items():
                         val_str = str(v)
                         if len(val_str) > 200:
                             val_str = val_str[:200] + "..."
-                        parts.append(f"    {k}: {val_str}")
+                        parts.append(f"{indent}    {k}: {val_str}")
                 else:
-                    parts.append(f"    {tool_input}")
+                    parts.append(f"{indent}    {tool_input}")
+                # Subagent spawn point: announce the child conversation(s).
+                if str(name).lower() in {"task", "agent"}:
+                    for child_id in spawns_by_index.get(step_idx, []):
+                        child = conv_by_id.get(child_id)
+                        if child:
+                            first = child.call_indices[0] if child.call_indices else "?"
+                            ret = (
+                                f", result returns at step {child.returns_at}"
+                                if child.returns_at is not None
+                                else ""
+                            )
+                            parts.append(
+                                f"{indent}    ↳ spawns {child_id} "
+                                f"(subagent:{child.subagent_type or '?'}, "
+                                f"{len(child.call_indices)} calls, runs at step {first}{ret})"
+                            )
                 result_text = str(block.get("result") or "")
                 if result_text:
-                    parts.append("<<< result:")
-                    parts.append(result_text)
+                    parts.append(f"{indent}<<< result:")
+                    parts.append(_indent_text(result_text, indent))
 
         parts.append("")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(parts), encoding="utf-8")
+
+
+def _indent_text(text: str, indent: str) -> str:
+    if not indent:
+        return text
+    return "\n".join(indent + line for line in text.splitlines())

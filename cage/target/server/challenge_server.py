@@ -363,8 +363,13 @@ def stop_challenge(
         )
 
     update_running_instance(run_id, lifecycle_state="stopping")
-    cleanup_instance(chal_id, run_id=run_id)
-    return StopResponse(status="stopped", chal_id=chal_id, message="Instance stopped and removed.")
+    captured_logs = cleanup_instance(chal_id, run_id=run_id)
+    return StopResponse(
+        status="stopped",
+        chal_id=chal_id,
+        message="Instance stopped and removed.",
+        container_logs=captured_logs or [],
+    )
 
 
 # DELETE /run/{cage_run_id} removed: batch teardown was the wrong shape.

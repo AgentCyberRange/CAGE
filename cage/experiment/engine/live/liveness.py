@@ -93,7 +93,7 @@ def is_run_running(run_dir: Path) -> RunLiveness:
       Anything else → dead.
     """
     if not run_dir.exists():
-        return RunLiveness(False, "run_dir missing")
+        return RunLiveness(False, "run directory is missing — nothing on disk owns these resources, reclaiming")
 
     dashboard_path = run_dir / "dashboard.json"
     planned_path = run_dir / "planned_trials.json"
@@ -117,10 +117,18 @@ def is_run_running(run_dir: Path) -> RunLiveness:
 
     record_completed_at = str(record_data.get("completed_at") or "").strip()
     if record_completed_at:
-        return RunLiveness(False, f"experiment_record completed_at={record_completed_at}")
+        return RunLiveness(
+            False,
+            f"run finished cleanly — experiment_record completed_at={record_completed_at}; "
+            f"reclaiming (artifacts kept in .cage_runs/)",
+        )
     record_status = str(record_data.get("status") or "").strip().lower()
     if record_status in {"completed", "interrupted", "failed", "cancelled"}:
-        return RunLiveness(False, f"experiment_record status={record_status}")
+        return RunLiveness(
+            False,
+            f"run ended — experiment_record status={record_status}; "
+            f"reclaiming (artifacts kept in .cage_runs/)",
+        )
     trial_record_liveness = _canonical_trial_record_liveness(run_dir)
     if trial_record_liveness is not None:
         return trial_record_liveness
@@ -130,29 +138,61 @@ def is_run_running(run_dir: Path) -> RunLiveness:
         and record_mtime > 0
         and is_recently_active(record_mtime)
     ):
-        return RunLiveness(True, f"experiment_record status={record_status}, fresh")
+        return RunLiveness(
+            True,
+            f"kept alive — experiment_record status={record_status}, updated <5m ago "
+            f"(freshness heuristic: gc trusts the recent file write, it does NOT "
+            f"check whether the cage run process is actually alive)",
+        )
 
     completed_at = str(dashboard_data.get("completed_at") or "").strip()
     if completed_at:
-        return RunLiveness(False, f"completed_at={completed_at}")
+        return RunLiveness(
+            False,
+            f"run finished cleanly — dashboard completed_at={completed_at}; "
+            f"reclaiming (artifacts kept in .cage_runs/)",
+        )
 
     signals: RunFsSignals = scan_run_signals(run_dir)
 
     if signals.active_count > 0 and is_recently_active(signals.newest_progress_mtime_ns):
-        return RunLiveness(True, f"{signals.active_count} active trial(s), recent progress.json tick")
+        return RunLiveness(
+            True,
+            f"kept alive — {signals.active_count} active trial(s), progress.json ticked <5m ago",
+        )
     if signals.active_count > 0:
-        return RunLiveness(False, f"{signals.active_count} active trial(s) but stalled")
+        return RunLiveness(
+            False,
+            f"{signals.active_count} active trial(s) but no progress for >5m — orchestrator "
+            f"stalled or was killed (SIGKILL/OOM/reboot); reclaiming (artifacts kept in .cage_runs/)",
+        )
 
     dashboard_pending = dashboard_pending_count(dashboard_data)
     if dashboard_mtime >= 0 and dashboard_pending > 0:
-        return RunLiveness(True, f"dashboard pending={dashboard_pending}, pre-tick")
+        return RunLiveness(
+            True,
+            f"kept alive — dashboard reports {dashboard_pending} pending trial(s), "
+            f"orchestrator just starting (no progress.json tick yet)",
+        )
 
     if dashboard_mtime < 0 and planned_mtime > 0 and is_recently_active(planned_mtime):
-        return RunLiveness(True, "planned_trials.json fresh, dashboard not yet written")
+        return RunLiveness(
+            True,
+            "kept alive — orchestrator just started: planned_trials.json written <5m ago, "
+            "no dashboard yet",
+        )
     if dashboard_mtime < 0 and record_mtime > 0 and is_recently_active(record_mtime):
-        return RunLiveness(True, "experiment_record.json fresh, dashboard not yet written")
+        return RunLiveness(
+            True,
+            "kept alive — orchestrator just started: experiment_record.json written <5m ago, "
+            "no dashboard yet",
+        )
 
-    return RunLiveness(False, "no activity signal")
+    return RunLiveness(
+        False,
+        "no run activity for >5m and no clean-finish marker — orchestrator is not running "
+        "(crashed or killed); reclaiming (artifacts kept in .cage_runs/)",
+    )
 
 
 def _canonical_trial_record_liveness(run_dir: Path) -> RunLiveness | None:
@@ -196,13 +236,19 @@ def _canonical_trial_record_liveness(run_dir: Path) -> RunLiveness | None:
             if record_mtime > 0 and is_recently_active(record_mtime):
                 return RunLiveness(
                     True,
-                    f"trial_record status={status}, fresh",
+                    f"kept alive — a trial is {status} and its trial_record was updated <5m ago "
+                    f"(freshness heuristic: gc trusts the recent file write, it does NOT "
+                    f"check whether the cage run process is actually alive)",
                 )
             continue
         if status not in _TERMINAL_TRIAL_RECORD_STATUSES:
             all_trial_records_terminal = False
     if saw_trial_record and all_trial_records_terminal:
-        return RunLiveness(False, "trial_record all terminal")
+        return RunLiveness(
+            False,
+            "every trial reached a terminal status (trial_record) — run is done; "
+            "reclaiming (artifacts kept in .cage_runs/)",
+        )
     return None
 
 

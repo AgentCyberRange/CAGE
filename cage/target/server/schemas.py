@@ -56,6 +56,10 @@ class StopResponse(BaseModel):
     status: str
     chal_id: str
     message: str
+    # Container logs captured just before purge, for audit. One entry per
+    # container: ``{name, service, status, exit_code, error, logs}``. Empty
+    # when the instance was already gone / not in memory.
+    container_logs: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ChallengeSummary(BaseModel):

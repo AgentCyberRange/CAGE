@@ -11,7 +11,7 @@ import os
 import re
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +49,7 @@ from cage.experiment.model import (
     experiment_record_to_mapping,
     experiment_spec_to_mapping,
 )
+from cage.proxy.conversations import ConversationForest, reconstruct_forest
 from cage.proxy.trajectory import (
     _blocks_from_responses_items,
     _extract_blocks,
@@ -1711,6 +1712,28 @@ def _flatten_score_mapping(raw: Any) -> dict[str, Any]:
     return scores
 
 
+def load_trial_score_details(trial_dir: Path) -> dict[str, Any]:
+    """Full scorer payloads for the trial detail view, keyed by metric.
+
+    ``_load_indexed_trial_scores`` flattens each metric to its scalar ``value``
+    because tables and the diagnosis line only need the number. The detail page
+    instead renders the *whole* scorer result — ``value``, ``answer``,
+    ``explanation`` and any ``metadata`` the scorer attached (e.g. cybergym's
+    ``vul_exit_code`` / ``fix_exit_code`` / ``poc_file``) — so a reader sees why
+    the trial scored what it did without opening the raw score file under Files.
+    """
+    details: dict[str, Any] = {}
+    for artifact in _indexed_trial_artifact_files(trial_dir):
+        if artifact.kind != "trial_score":
+            continue
+        raw = _load_json(artifact.path)
+        if not isinstance(raw, dict):
+            continue
+        for name, payload in raw.items():
+            details[str(name)] = payload
+    return details
+
+
 def _safe_run_relative_ref(run_dir: Path, ref: str | Path) -> Path | None:
     """Return a run-local artifact path for legacy refs, or ``None`` if unsafe."""
 
@@ -2770,6 +2793,39 @@ def parse_trial_trajectory(
     )
 
 
+_TRAJECTORY_SOURCE_CACHE: "OrderedDict[tuple, tuple[list[dict[str, Any]], ConversationForest]]" = OrderedDict()
+_TRAJECTORY_SOURCE_CACHE_MAX = 32
+_TRAJECTORY_SOURCE_LOCK = threading.Lock()
+
+
+def _trajectory_source(proxy_jsonl: Path) -> tuple[list[dict[str, Any]], ConversationForest]:
+    """Return ``(success_entries, forest)`` for a proxy log, cached by file stat.
+
+    Structure reconstruction needs the whole stream, so the file is read in full
+    on a cache miss. The cache (keyed on path + mtime + size) means paging through
+    a settled trajectory does not re-read the log; a live log's changing stat
+    invalidates the entry automatically.
+    """
+    try:
+        st = proxy_jsonl.stat()
+        key = (str(proxy_jsonl), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return [], reconstruct_forest([])
+    with _TRAJECTORY_SOURCE_LOCK:
+        cached = _TRAJECTORY_SOURCE_CACHE.get(key)
+        if cached is not None:
+            _TRAJECTORY_SOURCE_CACHE.move_to_end(key)
+            return cached
+    entries = _load_success_entries(proxy_jsonl)
+    forest = reconstruct_forest(entries)
+    with _TRAJECTORY_SOURCE_LOCK:
+        _TRAJECTORY_SOURCE_CACHE[key] = (entries, forest)
+        _TRAJECTORY_SOURCE_CACHE.move_to_end(key)
+        while len(_TRAJECTORY_SOURCE_CACHE) > _TRAJECTORY_SOURCE_CACHE_MAX:
+            _TRAJECTORY_SOURCE_CACHE.popitem(last=False)
+    return entries, forest
+
+
 def parse_trajectory(
     proxy_jsonl: Path,
     offset: int = 0,
@@ -2797,25 +2853,66 @@ def parse_trajectory(
 
     offset = max(0, int(offset or 0))
     limit = max(0, int(limit or 0))
-    if limit >= _FULL_TRAJECTORY_LIMIT:
-        entries = _load_success_entries(proxy_jsonl)
-        return _build_trajectory_payload(
-            entries,
-            offset=offset,
-            limit=limit,
-            total_steps_known=True,
-        )
-
-    entries, reached_eof = _load_success_entries_until(
-        proxy_jsonl,
-        stop_after=offset + limit + _TRAJECTORY_LOOKAHEAD_STEPS,
-    )
+    # Reconstructing harness structure (subagents/compaction/background) needs the
+    # whole stream — a subagent's parent edge can point anywhere — so we load the
+    # full success log and derive the conversation forest once, cache both keyed
+    # on (path, mtime, size), and paginate the rendered steps over them. The cache
+    # keeps repeated page fetches from re-reading the file (NAS-friendly); a live,
+    # growing log changes size/mtime and is re-read automatically.
+    entries, forest = _trajectory_source(proxy_jsonl)
     return _build_trajectory_payload(
         entries,
         offset=offset,
         limit=limit,
-        total_steps_known=reached_eof,
+        total_steps_known=True,
+        forest=forest,
     )
+
+
+def _forest_web_view(forest: ConversationForest | None) -> dict[str, Any]:
+    """Serialize a conversation forest for the trajectory payload."""
+    if forest is None:
+        return {"conversations": [], "spawns_by_index": {}, "returns_by_index": {}, "exits_by_index": {}, "structure": {}}
+    conversations = []
+    for conv in forest.conversations:
+        conversations.append({
+            "id": conv.id,
+            "kind": conv.kind,
+            "parent_id": conv.parent_id,
+            "depth": conv.depth,
+            "subagent_type": conv.subagent_type,
+            "num_calls": len(conv.call_indices),
+            "num_compactions": len(conv.compaction_calls),
+            "spawned_by": conv.spawned_by,
+            "spawn_prompt": (conv.spawned_by or {}).get("prompt", "") if conv.spawned_by else "",
+            "returns_at": conv.returns_at,
+            "usage": conv.usage,
+            "first_index": conv.call_indices[0] if conv.call_indices else None,
+            "last_index": conv.call_indices[-1] if conv.call_indices else None,
+        })
+    spawns_by_index: dict[int, list[str]] = {}
+    returns_by_index: dict[int, list[str]] = {}
+    exits_by_index: dict[int, list[str]] = {}
+    for conv in forest.conversations:
+        if conv.spawned_by and conv.spawned_by.get("parent_index") is not None:
+            spawns_by_index.setdefault(int(conv.spawned_by["parent_index"]), []).append(conv.id)
+        if conv.returns_at is not None:
+            returns_by_index.setdefault(int(conv.returns_at), []).append(conv.id)
+        # A subagent's last call is its end point — where its produced output is
+        # shown inline so a reader sees what it concluded without chasing the
+        # tool_result back into the parent.
+        if conv.kind == "subagent" and conv.call_indices:
+            exits_by_index.setdefault(int(conv.call_indices[-1]), []).append(conv.id)
+    structure = dict(forest.structure)
+    structure["root_rounds"] = forest.root_rounds
+    structure["root_usage"] = forest.root_usage
+    return {
+        "conversations": conversations,
+        "spawns_by_index": spawns_by_index,
+        "returns_by_index": returns_by_index,
+        "exits_by_index": exits_by_index,
+        "structure": structure,
+    }
 
 
 def _build_trajectory_payload(
@@ -2824,8 +2921,19 @@ def _build_trajectory_payload(
     offset: int,
     limit: int,
     total_steps_known: bool,
+    forest: ConversationForest | None = None,
 ) -> dict[str, Any]:
     total = len(entries)
+    fweb = _forest_web_view(forest)
+    conv_by_id = {c["id"]: c for c in fweb["conversations"]}
+    # A compaction is a real model call (the summary-generating call) followed by
+    # a continuation that resumes from that summary.
+    compaction_call_indices: set[int] = set()  # the call that PRODUCES the summary
+    compaction_resume_indices: set[int] = set()  # the call that RESUMES from it
+    if forest:
+        for conv in forest.conversations:
+            compaction_call_indices.update(conv.compaction_calls)
+            compaction_resume_indices.update(conv.compaction_at)
 
     if not entries:
         total_tokens: dict[str, Any] = {}
@@ -2843,6 +2951,8 @@ def _build_trajectory_payload(
             "has_more": False,
             "total_steps_known": True,
             "total_tokens_known": True,
+            "structure": fweb["structure"],
+            "conversations": fweb["conversations"],
         }
 
     tool_results_by_id = _collect_tool_results_by_id(entries)
@@ -2889,6 +2999,50 @@ def _build_trajectory_payload(
         for m in req_msgs:
             role = m.get("role", "?")
             context_summary[role] = context_summary.get(role, 0) + 1
+
+        # Harness-structure attribution for this call.
+        conv_id = forest.call_to_conv.get(idx) if forest else None
+        conv_meta = conv_by_id.get(conv_id or "", {})
+        conversation = {
+            "id": conv_id,
+            "kind": conv_meta.get("kind", "root"),
+            "depth": conv_meta.get("depth", 0),
+            "subagent_type": conv_meta.get("subagent_type"),
+            "parent_id": conv_meta.get("parent_id"),
+        }
+        is_compaction_call = idx in compaction_call_indices
+        is_compaction_resume = idx in compaction_resume_indices
+        # Subagent results that fold back into this step's context — the literal
+        # point where a subagent's output enters the parent agent's prompt.
+        returns_meta: list[dict[str, Any]] = []
+        for cid in fweb["returns_by_index"].get(idx, []):
+            cmeta = conv_by_id.get(cid, {})
+            tuid = (cmeta.get("spawned_by") or {}).get("tool_use_id") or ""
+            result_text = tool_results_by_id.get(tuid, "")
+            returns_meta.append({
+                "conversation_id": cid,
+                "subagent_type": cmeta.get("subagent_type"),
+                "tool_use_id": tuid,
+                "first_index": cmeta.get("first_index"),
+                "result_preview": result_text[:4000],
+                "result_len": len(result_text),
+                "result_truncated": len(result_text) > 4000,
+            })
+        # Subagents that end at this step — their produced output, shown inline at
+        # the subagent's own last step (its natural end point).
+        exits_meta: list[dict[str, Any]] = []
+        for cid in fweb["exits_by_index"].get(idx, []):
+            cmeta = conv_by_id.get(cid, {})
+            tuid = (cmeta.get("spawned_by") or {}).get("tool_use_id") or ""
+            result_text = tool_results_by_id.get(tuid, "")
+            exits_meta.append({
+                "conversation_id": cid,
+                "subagent_type": cmeta.get("subagent_type"),
+                "returns_at": cmeta.get("returns_at"),
+                "result_preview": result_text[:4000],
+                "result_len": len(result_text),
+                "result_truncated": len(result_text) > 4000,
+            })
         steps.append({
             "index": idx,
             "ts_ms": entry.get("ts_ms", 0),
@@ -2897,9 +3051,15 @@ def _build_trajectory_payload(
             "blocks": blocks,
             "context_summary": context_summary,
             "context_msg_count": len(req_msgs),
+            "conversation": conversation,
+            "is_compaction_call": is_compaction_call,
+            "is_compaction_resume": is_compaction_resume,
+            "spawns": fweb["spawns_by_index"].get(idx, []),
+            "returns": returns_meta,
+            "exits": exits_meta,
         })
 
-    has_more = not total_steps_known
+    has_more = (offset + limit) < total
     return {
         "total_steps": total,
         "steps": steps,
@@ -2914,6 +3074,8 @@ def _build_trajectory_payload(
         "has_more": has_more,
         "total_steps_known": total_steps_known,
         "total_tokens_known": total_steps_known,
+        "structure": fweb["structure"],
+        "conversations": fweb["conversations"],
     }
 
 

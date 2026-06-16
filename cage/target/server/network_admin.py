@@ -257,6 +257,49 @@ def summarize_project_containers(project_name: str, max_logs_tail: int = 40) -> 
     return summaries
 
 
+def capture_project_logs(
+    project_name: str, *, max_chars_per_container: int = 50_000
+) -> List[dict]:
+    """Capture logs for *every* container in a compose project, for audit.
+
+    Unlike ``summarize_project_containers`` (40-line tail, only non-running
+    containers), this grabs the full log of every container regardless of
+    state — so a crash-looping failure (e.g. a JVM cgroup-v2 NPE) and a clean
+    successful teardown both leave a complete, auditable record. Each
+    container's log is tail-capped to ``max_chars_per_container`` to bound
+    memory and on-disk artifact size.
+
+    MUST be called BEFORE the project is purged — once containers are removed
+    their logs are gone for good.
+    """
+    out: List[dict] = []
+    for c in list_project_containers(project_name):
+        entry: dict = {"name": getattr(c, "name", "<unknown>")}
+        try:
+            c.reload()
+            state = (c.attrs or {}).get("State", {}) if hasattr(c, "attrs") else {}
+            entry["service"] = (c.labels or {}).get("com.docker.compose.service")
+            entry["status"] = state.get("Status") or getattr(c, "status", None)
+            entry["exit_code"] = state.get("ExitCode")
+            entry["error"] = state.get("Error") or None
+            try:
+                raw = c.logs(timestamps=True)
+                text = (
+                    raw.decode("utf-8", errors="replace")
+                    if isinstance(raw, (bytes, bytearray))
+                    else str(raw)
+                )
+            except Exception as exc:
+                text = f"<failed to read logs: {exc}>"
+            if len(text) > max_chars_per_container:
+                text = "...(head truncated)...\n" + text[-max_chars_per_container:]
+            entry["logs"] = text
+        except Exception as exc:
+            entry["error"] = f"failed to capture: {exc}"
+        out.append(entry)
+    return out
+
+
 def resolve_service_inner_ips(project_name: str, network_name: str) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
     for container in list_project_containers(project_name):

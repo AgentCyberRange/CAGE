@@ -471,7 +471,12 @@ def decide_run(rid: str, *, search_roots: list[Path]) -> tuple[str, str, Path | 
         )
     run_dir = locate_run_dir(rid, search_roots=search_roots)
     if run_dir is None:
-        return DECISION_ORPHAN, "no .cage_runs/<rid>/ directory", None
+        return (
+            DECISION_ORPHAN,
+            "no .cage_runs/<rid>/ directory on disk — orphaned docker resources with no "
+            "owning run record; reclaiming",
+            None,
+        )
     verdict: RunLiveness = is_run_running(run_dir)
     if verdict.running:
         return DECISION_ALIVE, verdict.reason, run_dir

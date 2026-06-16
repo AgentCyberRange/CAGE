@@ -119,6 +119,24 @@ def _get_challenge_data_with_setup_gate(
             runtime_args=target_runtime_args(run, sample),
         )
 
+
+def _persist_target_logs(
+    storage: RunStorage, trial_id: str, container_logs: Any
+) -> None:
+    """Best-effort write of captured target container logs to the trial dir.
+
+    Called on both target-launch failure (logs come back in the 500 body) and
+    teardown (logs come back in the DELETE body). Never raises — log capture is
+    an audit aid, not part of the trial's success path.
+    """
+    if not container_logs:
+        return
+    try:
+        storage.save_target_logs(trial_id, container_logs)
+    except Exception as exc:
+        logger.warning("Failed to persist target logs for trial %s: %s", trial_id, exc)
+
+
 def _target_launch_failure_termination(detail: str, *, scheduler: RunScheduler):
     """Route target-launch failures to the right termination reason.
 
@@ -669,6 +687,14 @@ def _launch_and_attach_target(
                         "target_server-<run_id>.log for the response body"
                     )
 
+            # Persist the target container logs the server captured on failure
+            # (carried in the 500 body) so the real crash cause is auditable
+            # instead of being reduced to the one-line termination_detail.
+            if isinstance(target_data, dict):
+                _persist_target_logs(
+                    storage, trial.id, target_data.get("target_container_logs")
+                )
+
             if target_launch_error is None and target_data:
                 _record_target_runtime_resource(
                     storage=storage,
@@ -983,6 +1009,9 @@ def _cleanup_trial_resources(
         if chal_id:
             try:
                 teardown_result = challenge_client.finish_challenge(chal_id)
+                _persist_target_logs(
+                    storage, trial_id, getattr(teardown_result, "container_logs", None)
+                )
                 teardown_status, cleanup_error = _target_teardown_resource_status(
                     teardown_result,
                 )

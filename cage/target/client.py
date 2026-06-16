@@ -121,6 +121,10 @@ class TargetTeardownResult:
     succeeded: bool | None = None
     error: str | None = None
     backend: str = ""
+    # Container logs captured server-side just before purge (audit trail).
+    # Excluded from eq/hash so the frozen dataclass stays hashable despite
+    # holding a list.
+    container_logs: list = field(default_factory=list, compare=False, hash=False)
 
     @property
     def status(self) -> str:
@@ -409,15 +413,38 @@ class RemoteBackend(BackendStrategy):
             # ``resp.raise_for_status()`` drops the response body, which is
             # where ``_launch_challenge_impl`` puts the actual root cause
             # (docker compose stderr, subnet pool exhausted, health probe
-            # failures, …). Surface a trimmed copy so the orchestrator
-            # log shows *why* the launch failed.
+            # failures, …). The server now returns a structured detail
+            # ``{error, project_name, containers}`` where ``containers`` holds
+            # the full per-container logs. Pull the logs out as structured data
+            # (attached to the exception for the orchestrator to persist) and
+            # keep only a concise one-liner in the error string — otherwise the
+            # verbose log dump gets smashed into a truncated string and the real
+            # cause is lost.
             body = (resp.text or "").strip()
-            snippet = body if len(body) <= 2000 else body[:2000] + "...(truncated)"
-            raise requests.HTTPError(
+            concise = body
+            container_logs = None
+            try:
+                detail = resp.json().get("detail")
+                if isinstance(detail, dict):
+                    container_logs = detail.get("containers")
+                    concise = str(detail.get("error") or "").strip() or body
+                    proj = detail.get("project_name")
+                    if proj:
+                        concise = f"{concise} (project={proj})"
+            except Exception:
+                pass
+            if len(concise) > 2000:
+                concise = concise[:2000] + "...(truncated)"
+            err = requests.HTTPError(
                 f"{resp.status_code} {resp.reason} for url: {resp.url}"
-                + (f"\nbody: {snippet}" if snippet else ""),
+                + (f"\nbody: {concise}" if concise else ""),
                 response=resp,
             )
+            if container_logs is not None:
+                # Carried out-of-band so get_challenge_data can persist it
+                # without parsing the (concise) error string.
+                err.target_container_logs = container_logs
+            raise err
         data = resp.json()
 
         status = data.get("status")
@@ -530,6 +557,7 @@ class RemoteBackend(BackendStrategy):
         requested = False
         succeeded: bool | None = None
         error: str | None = None
+        container_logs: list = []
         try:
             if requests is None:
                 error = "requests is required for remote backend teardown"
@@ -543,6 +571,12 @@ class RemoteBackend(BackendStrategy):
                 )
                 if getattr(resp, "ok", False):
                     succeeded = True
+                    try:
+                        payload = resp.json()
+                        if isinstance(payload, dict):
+                            container_logs = payload.get("container_logs") or []
+                    except Exception:
+                        pass
                 else:
                     status_code = getattr(resp, "status_code", "unknown")
                     reason = getattr(resp, "reason", "")
@@ -568,6 +602,7 @@ class RemoteBackend(BackendStrategy):
             succeeded=succeeded,
             error=error,
             backend="remote",
+            container_logs=container_logs,
         )
 
     def _clear_service_tunnels(self, chal_id: str):
@@ -691,6 +726,13 @@ class ChallengeClient:
                     err_text if len(err_text) <= 4000
                     else err_text[:4000] + "...(truncated)"
                 )
+                # Structured container logs carried out-of-band on the
+                # exception (see RemoteBackend launch-failure path). Surfaced
+                # so trial_runner can persist them as an audit artifact rather
+                # than losing them to the concise error string.
+                logs = getattr(init_error, "target_container_logs", None)
+                if logs:
+                    meta["target_container_logs"] = logs
                 self.logger.error(f"Init failed: {init_error}")
             self.challenges[challenge_id] |= meta
             return meta
