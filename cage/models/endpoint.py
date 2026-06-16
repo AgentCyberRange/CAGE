@@ -38,7 +38,20 @@ class ModelConfig:
     # Code CLI has no knob to accept a custom window, so it cannot honour these.
     max_context_size: int | None = None
     reserved_context_size: int | None = None
+    # RL training integration. When ``rl_reward_sink`` is set, this model is in
+    # "RL mode": every LLM call it drives carries an ``X-Trial-Id`` header (so an
+    # external trainer can group one trajectory's calls), and each finished
+    # trial's reward is POSTed to this URL. Empty ⇒ an ordinary model, behaviour
+    # identical to before. It's a single typed knob so the whole feature toggles
+    # from one place in the model definition (registry / ``cage model set``).
+    rl_reward_sink: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def rl_enabled(self) -> bool:
+        """RL mode is on iff this model declares a reward sink."""
+
+        return bool(self.rl_reward_sink)
 
     @property
     def api_key_pool(self) -> list[str]:

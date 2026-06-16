@@ -78,6 +78,7 @@ from cage.experiment.engine.run_context import ExperimentRun
 from cage.experiment.engine.scheduler import RunScheduler
 from cage.experiment.engine.trial_runner import run_trial_isolated
 from cage.experiment.model import Trial, TrialResult
+from cage.rl.reward_sink import report_trial_rewards
 from cage.sandbox.admission import HostMemoryGate
 from cage.sandbox.naming import _parse_agent_label
 from cage.scoring.lifecycle import _build_summary, _score_trials
@@ -870,6 +871,11 @@ def _run_single_agent(run: ExperimentRun, agent: AgentInstance) -> list[TrialRes
     # Score via Benchmark
     _score_trials(results, run.benchmark, storage)
     _mark_canonical_trial_scoring_for_results(storage, agent, run.benchmark, results)
+
+    # RL reward report: the single point where every trial (success and
+    # failure/timeout) has its final score and the run/model are in scope.
+    # No-op unless this agent's model declares ``rl_reward_sink``.
+    report_trial_rewards(run, agent, results)
 
     summary = _build_summary(results)
     storage.save_summary(summary)

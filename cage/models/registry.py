@@ -17,6 +17,8 @@ _KNOWN_FIELDS = frozenset((
     # Context-window capabilities, promoted out of ``extra`` to typed fields.
     # ``context_window_size`` is an accepted alias for ``max_context_size``.
     "max_context_size", "reserved_context_size", "context_window_size",
+    # RL training integration: the reward sink URL (presence ⇒ RL mode on).
+    "rl_reward_sink",
 ))
 
 
@@ -95,6 +97,7 @@ def load_models(path: str | Path) -> dict[str, ModelConfig]:
                 cfg.get("max_context_size", cfg.get("context_window_size"))
             ),
             reserved_context_size=_optional_int(cfg.get("reserved_context_size")),
+            rl_reward_sink=str(cfg.get("rl_reward_sink", "") or "").strip(),
             extra={k: v for k, v in cfg.items() if k not in _KNOWN_FIELDS},
         )
 

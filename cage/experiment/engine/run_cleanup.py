@@ -92,6 +92,14 @@ class RunCleanup:
         # unblock + graceful unwind; second forces ``os._exit`` for users who
         # don't want to wait.
         self._sigint_count = 0
+        # Latched the instant the forced-quit path begins. A re-entry into the
+        # force branch (the user mashing Ctrl+C because "force-quitting now" did
+        # not return the prompt instantly) then short-circuits straight to
+        # ``os._exit`` — no second banner, no second results table, no repeated
+        # teardown. Without this the SIGINT handler is re-entrant during its own
+        # slow work and a flurry of presses prints the banner dozens of times
+        # and renders the table twice before the process finally exits.
+        self._force_in_progress = False
         # Optional zero-arg callback that prints a final status line. The forced
         # exit paths (second Ctrl+C, SIGTERM) ``os._exit`` straight from the
         # signal handler, bypassing the normal end-of-run results table — this
@@ -360,6 +368,63 @@ class RunCleanup:
         except Exception:  # noqa: BLE001
             pass
 
+    def _spawn_background_sweep(self) -> None:
+        """Detached, fire-and-forget removal of this run's docker resources.
+
+        The forced-quit handler must hand the prompt back within the blink
+        between two Ctrl+C presses, but ``docker rm -f`` of every in-flight
+        agent container takes seconds (it was the dominant cost of the old
+        synchronous teardown). Launch that work in its own session so it
+        outlives the immediate ``os._exit`` and the foreground returns at once.
+
+        Scoped to ``cage.run_id`` exactly like :func:`sweep_run` (containers +
+        networks + volumes). Best-effort — its errors are irrelevant; a later
+        ``cage gc`` or the next run's sweep reclaims any straggler. Spawned with
+        a single non-blocking ``Popen`` so the foreground cost is a few
+        milliseconds.
+        """
+        run_id = self.run_id
+        if not run_id:
+            return
+        flt = f'label=cage.run_id={run_id}'
+        sweep = (
+            f'ids=$(docker ps -aq --filter "{flt}"); '
+            f'[ -n "$ids" ] && docker rm -f -v $ids; '
+            f'nets=$(docker network ls -q --filter "{flt}"); '
+            f'[ -n "$nets" ] && docker network rm $nets; '
+            f'vols=$(docker volume ls -q --filter "{flt}"); '
+            f'[ -n "$vols" ] && docker volume rm -f $vols'
+        )
+        try:
+            subprocess.Popen(
+                ["bash", "-c", sweep],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                # Survive the parent's ``os._exit`` and detach from the terminal
+                # process group so the next Ctrl+C can't reach it.
+                start_new_session=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _stop_host_services_nonblocking(self) -> None:
+        """SIGTERM host-side per-run daemons without waiting (force-quit path).
+
+        :meth:`stop_host_services` waits up to 5s per service; the forced-quit
+        path can't block on that. Send SIGTERM and move on. The embedded
+        target_server is not touched here — it self-terminates once it notices
+        cage has reparented it (see ``target/serve.py``).
+        """
+        with self._host_services_lock:
+            services = list(self._host_services)
+            self._host_services.clear()
+        for svc in services:
+            try:
+                svc.process.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+
     def install_signal_handlers(self) -> None:
         """Register SIGTERM/SIGINT/atexit handlers that drive :meth:`teardown_all`.
 
@@ -368,14 +433,27 @@ class RunCleanup:
         raise. Queued trials bail (via ``_TrialCancelled`` in the conductor,
         before any container launch) while the in-flight trial(s) finish, so the
         run drains and returns on its own — partial dashboard preserved, target
-        stacks torn down on the normal exit path. Second SIGINT short-circuits to
-        the full :meth:`teardown_all` + ``os._exit`` path used by SIGTERM, for
-        users who don't want to wait for the in-flight trials to finish. SIGTERM
-        always does the full teardown then ``os._exit``s.
+        stacks torn down on the normal exit path.
+
+        Second SIGINT force-quits and must return the prompt *instantly* — fast
+        enough to land inside the gap between two keypresses. So it does only the
+        cheap, user-facing work in the foreground (print the force banner + the
+        partial results table once, finalize trial records) and hands the slow
+        ``docker rm -f`` of every in-flight container to a detached background
+        sweep (:meth:`_spawn_background_sweep`) before ``os._exit``. It also
+        latches ``_force_in_progress`` and resets SIGINT to ``SIG_DFL`` so any
+        further press (mashing) hard-exits at once instead of re-entering this
+        handler — which is what used to spam the banner and double-render the
+        table. SIGTERM does the full synchronous :meth:`teardown_all` then
+        ``os._exit``s (no interactive user to keep waiting).
         """
         atexit.register(self.teardown_all)
 
         def _handle_terminate(signum: int, frame: Any) -> None:
+            # A second terminate signal mid-teardown exits at once.
+            if self._force_in_progress:
+                os._exit(128 + signum)
+            self._force_in_progress = True
             logger.warning("Received signal %s — tearing down active runs", signum)
             self._emit_final_summary()
             try:
@@ -386,14 +464,37 @@ class RunCleanup:
         def _handle_interrupt(signum: int, frame: Any) -> None:
             self._sigint_count += 1
             if self._sigint_count >= 2:
+                # Re-entrant press while the forced quit is already underway
+                # (mashing): exit NOW — no second banner, table, or teardown.
+                if self._force_in_progress:
+                    os._exit(128 + signum)
+                self._force_in_progress = True
+                # Discard any further Ctrl+C for the brief remainder of this
+                # handler. The force path is fast and must run to completion so
+                # the banner + results table print exactly once before exit.
+                # Without this, a rapid follow-up press either re-enters and
+                # spams the banner (the original bug) or hard-kills before the
+                # table ever renders. SIGTERM / ``kill`` still work if the
+                # process genuinely wedges.
+                try:
+                    signal.signal(signal.SIGINT, signal.SIG_IGN)
+                except (ValueError, OSError):
+                    pass
+                # Launch the slow part OFF the critical path FIRST — a detached
+                # sweep that does the multi-second ``docker rm -f`` of every
+                # in-flight container — so docker cleanup runs while we print and
+                # the foreground never blocks on it.
+                self._spawn_background_sweep()
                 logger.warning(
                     "Second SIGINT — forcing exit without graceful unwind"
                 )
+                # Cheap, user-facing finish: force banner + partial results table
+                # (printed once), then stamp interrupted status on the records the
+                # sweep is killing so the inspector shows no phantom "running".
                 self._emit_final_summary()
-                try:
-                    self.teardown_all()
-                finally:
-                    os._exit(128 + signum)
+                self._finalize_running_trials()
+                self._stop_host_services_nonblocking()
+                os._exit(128 + signum)
             # FIRST Ctrl+C — graceful: let the in-flight trial(s) finish, cancel
             # the queued ones. Flag the live progress bar so it stops yanking
             # toward a misleading 100% as interrupted trials resolve, then print

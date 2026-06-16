@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Optional
 
 from cage.benchmarks.prompt_contract import render_strict
+from cage.contracts.scoring import extract_numeric_score_value
 from cage.scoring import Scorer
 
 if TYPE_CHECKING:
     from cage.artifacts.dashboard import Dashboard
+    from cage.experiment.model import TrialResult
     from cage.sandbox.containers import Container
 
 
@@ -218,6 +220,36 @@ class Benchmark(ABC):
     @abstractmethod
     def scorer(self) -> Scorer:
         """Return the default scorer applied to every trial."""
+
+    def reward(self, result: "TrialResult") -> float:
+        """Scalar RL reward in ``[0, 1]`` for one finished trial.
+
+        This is the Layer-2 seam an external RL trainer consumes (see
+        ``cage.rl.reward_sink``). The framework owns only the *mechanism* —
+        attaching a trial id to LLM calls and POSTing the number — while *what
+        the number means* is benchmark domain knowledge and lives here.
+
+        Default: the trial's primary score, i.e. the best numeric value the
+        benchmark's own :meth:`scorer` already produced, clamped to ``[0, 1]``.
+        A failed or unscored trial has no numeric score and yields ``0.0`` — so
+        timeouts/crashes report reward 0 without special-casing. Benchmarks that
+        want shaped reward (partial credit, combined metrics, a penalty term)
+        override this in their ``benchmark.py``; they need not touch Layer 1.
+
+        Only consulted when the run's model declares ``rl_reward_sink``; with RL
+        off this method is never called, so it costs ordinary evals nothing.
+        """
+
+        values = [
+            v
+            for v in (
+                extract_numeric_score_value(s) for s in result.scores.values()
+            )
+            if v is not None
+        ]
+        if not values:
+            return 0.0
+        return max(0.0, min(1.0, max(values)))
 
     def check_done(
         self,

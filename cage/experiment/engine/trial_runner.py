@@ -1256,6 +1256,17 @@ def execute_trial(
             # already supplies Authorization and ``container_proxy.py``
             # passes it through verbatim.
             _sub_mode = bool(model.auth_source) and not model.base_url
+            # RL mode: tag every upstream LLM call with the trial's join key so an
+            # external trainer can group one trajectory's calls. Rides the
+            # existing ``extra_headers`` channel (host writes it into the proxy
+            # config, the in-container proxy forwards it on every request), so no
+            # proxy edit is needed. Same key the reward report uses → they match
+            # byte-for-byte. Off unless the model declares ``rl_reward_sink``.
+            _extra_headers = dict(model.extra_headers or {})
+            if model.rl_enabled:
+                from cage.rl.reward_sink import rl_trial_id
+
+                _extra_headers["X-Trial-Id"] = rl_trial_id(run_id, trial_id)
             proxy_config = ProxyInstanceConfig(
                 upstream_base_url=(
                     "https://api.anthropic.com" if _sub_mode
@@ -1269,7 +1280,7 @@ def execute_trial(
                 port=0,
                 request_timeout=run.proxy.request_timeout,
                 http_proxy=run.proxy.upstream_http_proxy,
-                extra_headers=dict(model.extra_headers or {}),
+                extra_headers=_extra_headers,
                 upstream_extra_body=dict(model.upstream_extra_body or {}),
                 container_log_dir=(
                     _container_trial_proxy_dir(trial_id) if proxy_logs_mounted else ""

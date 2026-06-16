@@ -67,6 +67,16 @@ models:
   #    reserved_context_size  Tokens of output headroom an agent keeps free below
   #                        max_context_size before it auto-compacts. kimi_code only.
   #    context_window_size  Accepted alias for max_context_size (qwen naming).
+  #    rl_reward_sink      RL training integration. Set this to the URL of an
+  #                        external trainer's reward sink to put the model in
+  #                        "RL mode": every LLM call it drives carries an
+  #                        `X-Trial-Id` header (so the trainer can group one
+  #                        trajectory's calls), and each finished trial's reward
+  #                        is POSTed here as JSON `{trial_id, reward, success,
+  #                        sample_id, metrics}`. The reward number comes from the
+  #                        benchmark (`Benchmark.reward`, default = its score).
+  #                        Omit ⇒ an ordinary model, behaviour identical. This is
+  #                        the ONLY switch — the whole feature toggles from here.
   # ======================================================================
 
   # --- OpenAI-protocol SaaS, single key --------------------------------
@@ -102,6 +112,18 @@ models:
     # FIELDS note above: the Claude Code CLI has no custom-window knob.)
     # max_context_size: 262144
     # reserved_context_size: 20000      # output headroom kept free (kimi_code)
+
+  # --- RL training policy (verl etc.) — OpenAI endpoint + reward sink ----
+  #     The trainer serves the in-training policy as an OpenAI-compatible
+  #     endpoint; CAGE drives it like any OpenAI model. Adding `rl_reward_sink`
+  #     is the whole switch: trial ids ride on every call and rewards are
+  #     reported back. Drop that one line and this is a plain model again.
+  rl-policy:
+    provider: openai
+    model: rl-policy
+    base_url: ${RL_ENDPOINT}          # trainer's OpenAI-compatible policy server
+    api_key: dummy                    # trainer usually ignores the key
+    rl_reward_sink: ${RL_REWARD_SINK}  # where per-trial rewards are POSTed
 
   # --- Anthropic SaaS, single key --------------------------------------
   claude-opus:

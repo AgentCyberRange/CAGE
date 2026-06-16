@@ -212,6 +212,15 @@ def model_show(model_id: str, models_file: str | None, show_secret: bool) -> Non
 )
 @click.option("--timeout", type=int, default=None, help="Model request timeout in seconds.")
 @click.option("--max-retries", type=int, default=None, help="Upstream retry count.")
+@click.option(
+    "--rl-reward-sink",
+    default=None,
+    help=(
+        "Enable RL mode: URL the trainer's reward sink listens on. When set, "
+        "LLM calls carry an X-Trial-Id header and each trial's reward is POSTed "
+        "here. Pass an empty string to disable RL mode again."
+    ),
+)
 def model_set(
     model_id: str,
     models_file: str | None,
@@ -225,6 +234,7 @@ def model_set(
     output_cost_per_1m: float | None,
     timeout: int | None,
     max_retries: int | None,
+    rl_reward_sink: str | None,
 ) -> None:
     """Create or update one model entry."""
 
@@ -272,6 +282,13 @@ def model_set(
         entry["timeout"] = timeout
     if max_retries is not None:
         entry["max_retries"] = max_retries
+    if rl_reward_sink is not None:
+        # ``--rl-reward-sink ""`` clears the key (back to a normal model);
+        # any non-empty value turns RL mode on.
+        if rl_reward_sink:
+            entry["rl_reward_sink"] = rl_reward_sink
+        else:
+            entry.pop("rl_reward_sink", None)
 
     _write_model_registry_yaml(path, raw)
     click.echo(f"Model {model_id!r} written to {display_path(path)}")

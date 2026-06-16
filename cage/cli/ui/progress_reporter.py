@@ -409,14 +409,18 @@ class RunProgressReporter:
         except Exception:  # noqa: BLE001
             pass
         # Immediate acknowledgment that the SECOND Ctrl+C registered, flushed
-        # *before* the slower work below (reading every trial summary off disk,
-        # then ``teardown_all`` docker-rm latency). Without this the user sees a
-        # bare ``^C`` and several silent seconds before the table appears, which
-        # reads as "the second Ctrl+C did nothing".
+        # *before* the slower work below (reading every trial summary off disk
+        # to render the table). The container/network teardown itself no longer
+        # blocks here — it runs in a detached background sweep — so the banner
+        # spells out that cleanup outlives this exit and that mashing Ctrl+C
+        # again changes nothing.
         try:
             self.stream.write(
-                "\n⏹  Ctrl+C×2 — force-quitting now: killing in-flight trials and "
-                "cleaning up resources…\n"
+                "\n⏹  Ctrl+C×2 — force-quitting now:\n"
+                "   • in-flight trials killed; their containers & networks are\n"
+                "     removed by a background sweep that keeps running after exit.\n"
+                "   • pressing Ctrl+C again does nothing — cleanup finishes on its\n"
+                "     own (verify later with `docker ps` / `cage gc`).\n"
             )
             self.stream.flush()
         except Exception:  # noqa: BLE001
