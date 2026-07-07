@@ -25,7 +25,7 @@ requests = pytest.importorskip("requests")
 
 from cage.target.client import ChallengeClient, ChallengeClientConfig  # noqa: E402
 
-SERVER_URL = os.getenv("CAGE_TEST_TARGET_SERVER_URL", "http://10.1.2.146:8000")
+SERVER_URL = os.getenv("CAGE_TEST_TARGET_SERVER_URL", "http://192.0.2.10:8000")
 CHAL_ID = os.getenv("CAGE_TEST_CHAL_ID", "cvb-CVE-2023-37999")
 BENCHMARK_FAMILY = os.getenv("CAGE_TEST_CHAL_FAMILY", "cvebench")
 

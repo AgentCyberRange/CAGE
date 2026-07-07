@@ -19,8 +19,10 @@ from cage.experiment.engine.overlays import (
     apply_set_expressions,
     clone_project,
     materialize_effective_project,
+    merge_selected_agent_params,
     override_selected_agent_field,
     override_selected_agent_model,
+    parse_set_expression,
     set_project_path,
 )
 
@@ -143,6 +145,7 @@ def prepare_project_for_run(
     max_output_tokens: int | None,
     max_cost: float | None,
     set_values: tuple[str, ...],
+    param_values: tuple[str, ...] = (),
 ) -> tuple[Path, Path | None, str]:
     """Resolve and materialize the effective project for a run.
 
@@ -210,6 +213,22 @@ def prepare_project_for_run(
     if set_values:
         try:
             apply_set_expressions(raw, set_values)
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
+        changed = True
+
+    if param_values:
+        params: dict[str, object] = {}
+        for item in param_values:
+            try:
+                key, value = parse_set_expression(item)
+            except ValueError as exc:
+                raise click.UsageError(f"--param: {exc}") from exc
+            params[key] = value
+        try:
+            merge_selected_agent_params(
+                raw, agent_ids=agent_ids, params=params, flag="--param",
+            )
         except ValueError as exc:
             raise click.UsageError(str(exc)) from exc
         changed = True

@@ -17,11 +17,23 @@
   .step-card { border-left-width: 3px; }
   .step-card.conv-root { border-left-color: rgba(71,85,105,.6); }
   .step-card.conv-subagent { border-left-color: rgba(168,85,247,.7); }
+  .step-card.conv-agent { border-left-color: rgba(45,212,191,.6); }
   .step-card.conv-background { border-left-color: rgba(100,116,139,.4); }
   .conv-badge { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; letter-spacing: .02em; }
   .conv-badge.root { color: #94a3b8; background: rgba(71,85,105,.25); }
   .conv-badge.subagent { color: #d8b4fe; background: rgba(168,85,247,.18); }
+  .conv-badge.agent { color: #5eead4; background: rgba(45,212,191,.15); }
   .conv-badge.background { color: #64748b; background: rgba(100,116,139,.15); }
+  /* De-interleaved conversation lanes (grouped mode). */
+  .conv-lane { border-left: 3px solid #334155; border-radius: 10px; margin: 10px 0; padding-left: 2px; background: rgba(148,163,184,.03); }
+  .conv-lane .conv-lane { margin: 8px 0 8px 20px; }        /* nested subagent lanes indent */
+  .conv-lane-root { border-left-color: rgba(71,85,105,.7); background: transparent; }
+  .lane-head { display: flex; align-items: center; gap: 9px; padding: 6px 12px; font-size: 12px; border-bottom: 1px solid rgba(51,65,85,.5); border-left: 0; flex-wrap: wrap; }
+  .lane-toggle { background: none; border: 0; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; }
+  .lane-label { font-weight: 700; }
+  .lane-id { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .lane-meta { color: #94a3b8; font-size: 11px; }
+  .lane-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
   .bg-call-line { font-size: 11px; color: #64748b; padding: 4px 14px; display: flex; align-items: center; gap: 8px; }
   .compaction-divider { display: flex; align-items: center; gap: 10px; margin: 6px 0; color: #fbbf24; font-size: 14px; font-weight: 600; }
   .compaction-divider::before, .compaction-divider::after { content: ""; flex: 1; height: 1px; background: repeating-linear-gradient(90deg, rgba(251,191,36,.5) 0 6px, transparent 6px 12px); }
@@ -89,11 +101,6 @@
   .tool-def-prompt { white-space: pre-wrap; word-break: break-word; font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px; line-height: 1.55; color: #cbd5e1; background: rgba(2,6,23,.55); border: 1px solid rgba(51,65,85,.65); border-radius: 6px; padding: 10px 12px; max-height: 320px; overflow: auto; }
   .token-bar { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: #94a3b8; margin: 4px 0 10px; }
   .token-bar strong { color: #e2e8f0; font-family: 'JetBrains Mono','Consolas',monospace; }
-  .json-view .json-key { color: #93c5fd; }
-  .json-view .json-string { color: #86efac; }
-  .json-view .json-number { color: #c4b5fd; }
-  .json-view .json-bool { color: #fdba74; }
-  .json-view .json-null { color: #94a3b8; }
   .diff-section { border: 1px solid rgba(51,65,85,.8); border-radius: 7px; background: rgba(2,6,23,.28); margin-bottom: 9px; overflow: hidden; }
   .diff-section-header { display: flex; align-items: center; gap: 8px; padding: 9px 12px; color: #e2e8f0; font-size: 13px; font-weight: 700; }
   .ds-badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; font-weight: 700; }
@@ -125,6 +132,60 @@
   @media (max-width: 900px) {
     #json-panel { width: 100%; min-width: 0; left: 0; top: 48px; }
   }
+  /* Long plaintext message bodies (the setup system-reminder / skills wall,
+     pasted logs) get a height cap + fade so an OPENED message never floods the
+     panel — the same "don't wall out" contract .tap-pre already has. */
+  .content-block.capped { max-height: 20rem; overflow: hidden; position: relative; }
+  .content-block.capped::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3.25rem; background: linear-gradient(to bottom, rgba(12,18,34,0), #0c1222); pointer-events: none; }
+  .content-block.capped.open { max-height: none; overflow: visible; }
+  .content-block.capped.open::after { display: none; }
+  .content-more { display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 600; color: #93c5fd; cursor: pointer; user-select: none; }
+  .content-more:hover { color: #dbeafe; }
+  /* In-place search hit — shared by the trajectory (step-card) search and the
+     detail-panel search, so a hit is marked exactly where the text is instead
+     of only ringing the whole card. Active hit is the one nav is parked on. */
+  .cage-hl { background: rgba(250,204,21,.28); color: #fde68a; border-radius: 2px; padding: 0 1px; }
+  .cage-hl.cage-hl-active { background: rgba(250,204,21,.7); color: #1a1206; box-shadow: 0 0 0 2px rgba(250,204,21,.6); }
+  /* Each assistant/user content block shown as a labelled unit so a message's
+     structure (thinking / response / tool_use / tool_result) is legible and its
+     schema visible at a glance. */
+  .tap-block { border: 1px solid rgba(51,65,85,.7); border-radius: 7px; margin: 7px 0; overflow: hidden; background: rgba(2,6,23,.30); }
+  .tap-block-head { display: flex; align-items: center; gap: 7px; padding: 5px 10px; font-size: 11px; font-weight: 700; background: rgba(30,41,59,.5); }
+  .tap-block-kind { font-family: 'JetBrains Mono','Consolas',monospace; letter-spacing: .02em; }
+  .tap-block.thinking { border-color: rgba(139,92,246,.4); }
+  .tap-block.thinking .tap-block-head { color: #c4b5fd; background: rgba(99,102,241,.14); }
+  .tap-block.text { border-color: rgba(59,130,246,.35); }
+  .tap-block.text .tap-block-head { color: #93c5fd; background: rgba(37,99,235,.12); }
+  .tap-block.tooluse { border-color: rgba(8,145,178,.45); }
+  .tap-block.tooluse .tap-block-head { color: #67e8f9; background: rgba(8,145,178,.14); }
+  .tap-block.toolresult { border-color: rgba(139,92,246,.4); }
+  .tap-block.toolresult .tap-block-head { color: #d8b4fe; background: rgba(139,92,246,.14); }
+  .tap-block-body { padding: 8px 10px; }
+  .tap-block-name { color: #e2e8f0; font-family: 'JetBrains Mono','Consolas',monospace; }
+  .tap-block-id { margin-left: auto; font-size: 10px; color: #64748b; font-family: 'JetBrains Mono','Consolas',monospace; font-weight: 500; }
+  .tap-block-err { color: #fca5a5; background: rgba(127,29,29,.45); border-radius: 4px; padding: 1px 6px; font-size: 10px; }
+  /* Collapsible, colour-coded JSON tree — Raw JSON tab + tool_use inputs. Deep
+     nodes fold; indent guides + type colours make the hierarchy pop. */
+  .jt { font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px; line-height: 1.6; }
+  .jt-node > summary { list-style: none; cursor: pointer; padding: 1px 0; border-radius: 3px; }
+  .jt-node > summary::-webkit-details-marker { display: none; }
+  .jt-node > summary:hover { background: rgba(148,163,184,.08); }
+  .jt-tw { display: inline-block; width: 12px; color: #64748b; }
+  .jt-node[open] > summary .jt-tw::before { content: "▾"; }
+  .jt-node:not([open]) > summary .jt-tw::before { content: "▸"; }
+  .jt-children { margin-left: 5px; padding-left: 11px; border-left: 1px solid rgba(51,65,85,.5); }
+  .jt-leaf { padding: 1px 0 1px 12px; white-space: pre-wrap; word-break: break-word; }
+  .jt-key { color: #93c5fd; }
+  .jt-punc, .jt-brace { color: #64748b; }
+  .jt-count { color: #64748b; font-style: italic; margin: 0 5px; }
+  .jt-str { color: #86efac; }
+  .jt-num { color: #c4b5fd; }
+  .jt-bool { color: #fdba74; }
+  .jt-null { color: #64748b; font-style: italic; }
+  .jt-preview { color: #64748b; opacity: .75; }
+  .jt-node[open] > summary .jt-preview-collapsed { display: none; }
+  .jt-str-more { color: #60a5fa; cursor: pointer; font-style: italic; }
+  .jt-toolbar { display: flex; gap: 6px; margin-bottom: 10px; position: sticky; top: 0; z-index: 2; background: #0c1222; padding: 4px 0; }
 </style>
 {% endblock %}
 
@@ -350,6 +411,31 @@
 <div id="trial-evidence"></div>
 {% endif %}
 
+{% if is_cairn %}
+<!-- Cairn graph: server-rendered, one button for any cairn trial. The link
+     reverse-proxies this trial's live Cairn UI while it runs, and statically
+     renders its cairn_graph.yaml snapshot once it ends — same origin
+     (/cairn/<trial>/), deep-linked to the graph, concurrency-safe per trial. -->
+{% set cairn_running = trial_status.get('running') %}
+<details id="cairn-graph-panel" class="bg-surface rounded-xl border border-emerald-700/40 mb-4"{% if cairn_running or cairn_graph_snapshot %} open{% endif %}>
+  <summary class="px-6 py-4 text-sm font-semibold text-emerald-300 hover:text-white">
+    Cairn graph
+    <span class="ml-2 text-xs font-normal text-slate-500">fact / intent graph</span>
+  </summary>
+  <div class="px-6 pb-5 pt-1 text-sm text-slate-400">
+    {% if cairn_running or cairn_graph_snapshot %}
+      <a href="{{ cairn_graph_url }}" target="_blank" rel="noopener"
+         class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 font-medium text-emerald-200 hover:bg-emerald-500/20">{% if cairn_running %}Open live Cairn graph &rarr;{% else %}Open Cairn graph (final snapshot) &rarr;{% endif %}</a>
+      <div class="mt-2 text-xs text-slate-500">
+        {% if cairn_running %}Cairn's own fact/intent graph for this trial, proxied through the inspector (same origin — no extra tunnel). Updates live as the agent explores; the button opens the graph directly.{% else %}The settled fact/intent graph (<code>cairn_graph.yaml</code>) for this finished trial, rendered through Cairn's own viewer. The raw snapshot is also in the <strong>Files</strong> panel below.{% endif %}
+      </div>
+    {% else %}
+      <div class="text-sm text-slate-400">No Cairn graph for this trial yet — the snapshot (<code>cairn_graph.yaml</code>) is collected when the trial ends. If the trial died early it may have produced none.</div>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
 <!-- Files -->
 <details
   id="trial-files-panel"
@@ -414,12 +500,19 @@
 </details>
 {% endfor %}
 
+
 <!-- Trajectory -->
 {% if trial.has_trajectory %}
 <div id="trial-trajectory" class="mb-4">
   <h2 class="text-lg font-bold text-white">Trajectory</h2>
   <p id="trajectory-summary" class="mt-1 text-sm text-slate-400">Loading step count, token totals, and tool timeline...</p>
   <div id="trajectory-structure" class="mt-2"></div>
+  <details id="tool-distribution" class="mt-3 rounded-lg border border-slate-700/60 bg-surface hidden" open>
+    <summary class="cursor-pointer select-none px-4 py-2.5 text-sm font-semibold text-slate-200 hover:text-white">
+      Tool calls <span id="tool-distribution-total" class="ml-1 text-xs font-normal text-slate-500"></span>
+    </summary>
+    <div id="tool-distribution-bars" class="space-y-1.5 px-4 pb-4 pt-1"></div>
+  </details>
 </div>
 
 <div id="trajectory-container" class="space-y-3 pb-24">
@@ -438,7 +531,7 @@
       <div id="token-bar-fill" class="h-full bg-blue-500 rounded-full transition-all" style="width:0%"></div>
     </div>
     <div class="flex-1 max-w-md relative">
-      <input id="search-input" type="text" placeholder="Search steps... (Ctrl+F)"
+      <input id="search-input" type="text" placeholder="Search trajectory — marks matches (Ctrl+F)"
         class="w-full px-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
       <div id="search-count" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500 hidden"></div>
     </div>
@@ -473,18 +566,10 @@
       <div class="flex-1"></div>
       <button type="button" data-context-panel-action="close" class="px-2 py-0.5 text-xs rounded border border-slate-600 text-slate-400 hover:text-white shrink-0">&#10005;</button>
     </div>
-    <div class="flex items-center gap-3 mt-2">
-      <div class="flex-1 relative max-w-xs">
-        <input id="json-search" type="text" placeholder="Search details..."
-        class="w-full px-3 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
-        <span id="json-search-count" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500"></span>
-      </div>
-      <span class="text-[11px] text-slate-500">Request context inspector</span>
-    </div>
     <div class="ctx-mode-tabs" data-context-mode-tabs>
-      <button type="button" class="ctx-mode-btn" data-context-mode="readable" data-context-mode-active="true">Readable evidence</button>
-      <button type="button" class="ctx-mode-btn" data-context-mode="tools" data-context-mode-active="false">Tool timeline</button>
+      <button type="button" class="ctx-mode-btn" data-context-mode="readable" data-context-mode-active="true">Readable</button>
       <button type="button" class="ctx-mode-btn" data-context-mode="raw" data-context-mode-active="false">Raw JSON</button>
+      <span class="ml-auto self-center text-[11px] text-slate-500">Request context · press <kbd class="px-1 py-0.5 rounded border border-slate-600 text-slate-400">Ctrl/⌘-F</kbd> to find</span>
     </div>
   </div>
   <div class="flex-1 overflow-y-auto px-4 pb-6" id="json-scroll">
@@ -679,6 +764,11 @@ const IS_RUNNING = {{ trial_status.get('running', false) | tojson }};
 const BATCH = 50;
 let allSteps = [];
 let renderedCount = 0;
+// director re-injects the CURRENT hint into ~every turn's observation (it only refreshes
+// the content every ~8 turns), so the same <system-reminder> appears in dozens of
+// observations. We highlight each DISTINCT hint only ONCE — at the observation where it
+// first changes — so the yellow marks the real director decision points, not every carrier.
+let _hlSeen = new Set();
 let totalSteps = 0;
 let totalStepsKnown = true;
 let hasMoreSteps = false;
@@ -698,6 +788,12 @@ const FILES_COLLAPSE_KEY = `cage-files-collapsed:${TRIAL_PATH}`;
 // ========== INIT ==========
 (async function init() {
   const statusEl = document.getElementById('traj-status');
+  // Capture a deep-link (…/trial#step-N) up front and strip the fragment so the
+  // browser's native "scroll to #id once it appears" can't race our own
+  // controlled jump: grouped mode inserts the target step late, and the two
+  // scrolls fight and overshoot. jumpToStep re-stamps #step-N once rendered.
+  const deepLinkStep = stepFromHash();
+  if (deepLinkStep != null) history.replaceState(null, '', location.pathname + location.search);
   setupFilesPanel();
   bindTrajectoryControls();
   bindContextPanelControls();
@@ -707,16 +803,27 @@ const FILES_COLLAPSE_KEY = `cage-files-collapsed:${TRIAL_PATH}`;
     document.getElementById('loading-indicator')?.remove();
     updateJumpMax();
     updateStatus();
-    renderNextBatch();
-    loadObserver = new IntersectionObserver(async entries => {
-      if (!entries[0].isIntersecting) return;
-      if (renderedCount >= allSteps.length && allSteps.length < totalSteps) {
-        await loadSteps(allSteps.length, BATCH);
-      }
+    if (isGroupedMode() && !IS_RUNNING) {
+      // Concurrent conversations: de-interleave into contiguous lanes. Trials
+      // that delegate/parallelise are bounded (~hundreds of steps), so we load
+      // the whole stream once and render grouped rather than incrementally.
+      await renderGroupedAll();
+    } else {
       renderNextBatch();
-    }, { rootMargin: '400px' });
-    loadObserver.observe(document.getElementById('scroll-sentinel'));
-    if (IS_RUNNING) setInterval(pollForNewSteps, 5000);
+      loadObserver = new IntersectionObserver(async entries => {
+        if (!entries[0].isIntersecting) return;
+        if (renderedCount >= allSteps.length && allSteps.length < totalSteps) {
+          await loadSteps(allSteps.length, BATCH);
+        }
+        renderNextBatch();
+      }, { rootMargin: '400px' });
+      loadObserver.observe(document.getElementById('scroll-sentinel'));
+      if (IS_RUNNING) setInterval(pollForNewSteps, 5000);
+    }
+    // Deep-link support: land on #step-N even when it isn't in the first
+    // rendered batch (and after neutralizing the native fragment scroll above).
+    // jumpToStep loads + renders the target, scrolls to it, and re-stamps #step-N.
+    if (deepLinkStep != null) jumpToStep(deepLinkStep);
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
   }
@@ -738,6 +845,8 @@ function bindTrajectoryControls() {
       if (event.key === 'Enter') jumpToStep(input.value);
     });
   });
+  // #step-N anchors and manual URL edits / back-forward route through jumpToStep.
+  window.addEventListener('hashchange', handleHashNav);
 }
 
 function bindContextPanelControls() {
@@ -758,6 +867,8 @@ function bindContextPanelControls() {
     const action = button.dataset.contextAction || '';
     if (action === 'copy-request') copyContextRequest(button);
     else if (action === 'scroll-section') scrollContextSection(button.dataset.contextSection || '');
+    else if (action === 'jt-expand') jtToggleAll(true);
+    else if (action === 'jt-collapse') jtToggleAll(false);
   });
 }
 
@@ -925,7 +1036,7 @@ async function loadSteps(offset, limit) {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const incoming = data.steps || [];
-  if (offset === 0) allSteps = incoming;
+  if (offset === 0) { allSteps = incoming; _hlSeen = new Set(); }
   else mergeSteps(incoming);
   hasMoreSteps = Boolean(data.has_more);
   totalStepsKnown = data.total_steps_known !== false;
@@ -937,6 +1048,8 @@ async function loadSteps(offset, limit) {
   trajectorySummary = data.summary || trajectorySummary || {};
   if (data.structure) trajectoryStructure = data.structure;
   if (data.conversations) trajectoryConversations = data.conversations;
+  if (offset === 0 && data.node_flow) trajectoryNodeFlow = data.node_flow;
+  if (offset === 0) renderDirectorBadge(data.director_hints);
   renderStructure();
   updateJumpMax();
   updateStatus();
@@ -945,37 +1058,81 @@ async function loadSteps(offset, limit) {
 
 let trajectoryStructure = {};
 let trajectoryConversations = [];
+// Authoritative director-hint tally for the WHOLE trajectory (from the server, not the loaded
+// page), so the count is right before any scrolling and Ctrl-F isn't fooled by lazy-loading.
+let directorHintSteps = [];
+function renderDirectorBadge(dh) {
+  let el = document.getElementById('director-badge');
+  if (!dh || !dh.count) { if (el) el.remove(); return; }
+  directorHintSteps = dh.steps || [];
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'director-badge';
+    el.style.cssText = 'margin-top:8px;';
+    const sum = document.getElementById('trajectory-summary');
+    sum.parentNode.insertBefore(el, sum.nextSibling);
+  }
+  el.innerHTML = `<button type="button" id="director-badge-btn" title="Load every step and jump to the first director hint (so Ctrl-F finds them all)" style="font-size:12px;font-weight:700;color:#fbbf24;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);border-radius:9999px;padding:3px 12px;cursor:pointer;">💉 director hints: ${dh.count} — click to load all & jump</button>`;
+  document.getElementById('director-badge-btn').onclick = async () => {
+    const btn = document.getElementById('director-badge-btn');
+    btn.textContent = '💉 loading all steps…';
+    await renderAllRemaining();
+    btn.textContent = `💉 director hints: ${dh.count} (all loaded — Ctrl-F now works)`;
+    const first = directorHintSteps[0];
+    if (first != null) { const c = document.getElementById('step-' + first); if (c) c.scrollIntoView({behavior: 'smooth', block: 'center'}); }
+  };
+}
+let trajectoryNodeFlow = [];
 
 function renderStructure() {
   const host = document.getElementById('trajectory-structure');
   if (!host) return;
   const s = trajectoryStructure || {};
-  const subs = (trajectoryConversations || []).filter(c => c.kind === 'subagent');
-  const hasStructure = (s.num_subagents || 0) > 0 || (s.num_compactions || 0) > 0 || (s.num_background_calls || 0) > 0;
-  if (!hasStructure) { host.innerHTML = ''; return; }
+  const subs = (trajectoryConversations || []).filter(c => c.kind === 'subagent' || c.kind === 'agent');
+  const flow = trajectoryNodeFlow || [];
+  const hasStructure = (s.num_subagents || 0) > 0 || (s.num_agents || 0) > 0 || (s.num_compactions || 0) > 0 || (s.num_background_calls || 0) > 0;
+  // Real LangGraph node route (when the agent's requests carried X-Cage-Node).
+  // This is ground truth; it replaces the heuristic forest for such agents.
+  let flowHTML = '';
+  if (flow.length) {
+    const pills = flow.map(seg =>
+      `<span class="px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-xs whitespace-nowrap">▸ ${esc(seg.node)}${seg.count > 1 ? ` <span class="text-cyan-500/60">×${seg.count}</span>` : ''}</span>`
+    ).join('<span class="text-slate-600 mx-0.5">→</span>');
+    flowHTML = `<div class="${hasStructure ? 'mb-2' : ''}"><div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">LangGraph node route · per model request</div><div class="flex flex-wrap items-center gap-1">${pills}</div></div>`;
+  }
+  if (!hasStructure && !flow.length) { host.innerHTML = ''; return; }
+  if (!hasStructure) {
+    host.innerHTML = `<div class="struct-card rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">${flowHTML}</div>`;
+    return;
+  }
   const chips = [];
   chips.push(`<span class="struct-chip" title="Root agent decision rounds (excludes subagents, background and compaction calls)">🧠 root rounds <b class="text-white">${s.root_rounds ?? '?'}</b></span>`);
   if (s.num_subagents) chips.push(`<span class="struct-chip" style="color:#d8b4fe">⑂ subagents <b>${s.num_subagents}</b> (depth ${s.max_depth || 1})</span>`);
+  if (s.num_agents) chips.push(`<span class="struct-chip" style="color:#5eead4" title="Independent top-level conversations that share the proxy with no observed Task spawn edge — concurrent workers / agent-team peers (e.g. Cairn)">‖ concurrent agents <b>${s.num_agents}</b></span>`);
   if (s.num_compactions) chips.push(`<span class="struct-chip" style="color:#fbbf24">✂ compactions <b>${s.num_compactions}</b></span>`);
   if (s.num_background_calls) chips.push(`<span class="struct-chip" style="color:#64748b">· background <b>${s.num_background_calls}</b></span>`);
   let tree = '';
   if (subs.length) {
     tree = '<div class="mt-2 pl-1 border-l border-slate-700/50">' + subs.map(c => {
-      const indent = (c.depth || 1) * 14;
+      const isAgent = c.kind === 'agent';
+      const indent = (isAgent ? 0 : (c.depth || 1)) * 14;
       const inTok = (c.usage && c.usage.input_tokens) ? fmtTok(c.usage.input_tokens) : '0';
       const spawnedAt = (c.spawned_by && c.spawned_by.parent_index != null) ? c.spawned_by.parent_index : null;
       const retLink = (c.returns_at != null)
         ? ` <span class="text-slate-600">→</span> <a href="#step-${c.returns_at}" class="text-emerald-400 hover:underline">returns step ${c.returns_at}</a>` : '';
       const fromLabel = (spawnedAt != null) ? `step ${spawnedAt} <span class="text-slate-600">⑂→</span> ` : '';
+      const badge = isAgent
+        ? `<span class="conv-badge agent">‖ agent</span>`
+        : `<span class="conv-badge subagent">subagent:${esc(c.subagent_type || '?')}</span>`;
       return `<div class="struct-tree-row" style="padding-left:${indent}px">
-        <span class="conv-badge subagent">subagent:${esc(c.subagent_type || '?')}</span>
+        ${badge}
         <span class="text-slate-400">${c.num_calls} calls · ${inTok} in${c.num_compactions ? ' · ✂'+c.num_compactions : ''}</span>
         <span>${fromLabel}<a href="#step-${c.first_index}" class="text-blue-400 hover:underline">runs step ${c.first_index}</a>${retLink}</span>
       </div>`;
     }).join('') + '</div>';
   }
   host.innerHTML = `<div class="struct-card rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
-    <div class="flex flex-wrap items-center gap-2">${chips.join('')}</div>${tree}
+    ${flowHTML}<div class="flex flex-wrap items-center gap-2">${chips.join('')}</div>${tree}
   </div>`;
 }
 
@@ -1027,89 +1184,249 @@ function renderNextBatch() {
   const end = Math.min(renderedCount + BATCH, allSteps.length);
   const fragment = document.createDocumentFragment();
   for (let i = renderedCount; i < end; i++) {
-    const step = allSteps[i];
-    const conv = step.conversation || {};
-    const kind = conv.kind || 'root';
-    const depth = conv.depth || 0;
-
-    // Compaction CALL: a real model call whose input is the full history + a
-    // "summarize the conversation" instruction and whose output (below) is the
-    // summary. It renders as a normal step card; this banner explains its role.
-    if (step.is_compaction_call) {
-      const div = document.createElement('div');
-      div.className = 'compaction-divider';
-      div.style.marginLeft = (depth * 24) + 'px';
-      div.innerHTML = `<span>✂ compaction call — the model summarizes the conversation (input ${fmtTok(step.tokens.in)} = full history + summarize prompt → output below = the summary, reused as the next call's context)</span>`;
-      fragment.appendChild(div);
-    }
-    // Continuation: the next call resumes from that summary (input collapsed).
-    if (step.is_compaction_resume) {
-      const div = document.createElement('div');
-      div.className = 'compaction-resume';
-      div.style.marginLeft = (depth * 24) + 'px';
-      div.innerHTML = `<span>↩ resumes from the compaction summary — context now ${fmtTok(step.tokens.in)} in</span>`;
-      fragment.appendChild(div);
-    }
-
-    // Subagent result folding back into this step's context: the literal point
-    // where a subagent's output enters the parent agent's prompt. The full text
-    // is shown expanded at the subagent's own last step, so this stays a concise
-    // marker linking back to it.
-    for (const ret of (step.returns || [])) {
-      const div = document.createElement('div');
-      div.className = 'return-banner';
-      div.style.marginLeft = (depth * 24) + 'px';
-      const fromLink = (ret.first_index != null)
-        ? ` <a href="#step-${ret.first_index}" class="text-violet-300 hover:underline">(produced at step ${ret.first_index})</a>` : '';
-      div.innerHTML = `<div class="return-banner-head">⤶ subagent:${esc(ret.subagent_type || '?')} (${esc(ret.conversation_id)}) output (${fmtTok(ret.result_len || 0)} chars) merged into context here${fromLink}</div>`;
-      fragment.appendChild(div);
-    }
-
-    // Background/auxiliary calls: a single demoted line, not a full card.
-    if (kind === 'background') {
-      const line = document.createElement('div');
-      line.id = `step-${step.index}`;
-      line.className = 'bg-call-line';
-      line.style.marginLeft = (depth * 24) + 'px';
-      const txt = (step.blocks.find(b => b.type === 'text') || {}).content || '';
-      line.innerHTML = `<span>·</span><span class="conv-badge background">background</span>
-        <span>step ${step.index} · ${fmtTok(step.tokens.in)} in / ${fmtTok(step.tokens.out)} out</span>
-        <span class="text-slate-600 truncate">${esc(String(txt).slice(0, 80))}</span>
-        <button type="button" data-context-step-index="${step.index}" class="ml-auto text-slate-600 hover:text-slate-300">JSON</button>`;
-      fragment.appendChild(line);
-      continue;
-    }
-
-    const div = document.createElement('div');
-    div.id = `step-${step.index}`;
-    div.className = `step-card bg-surface rounded-xl border border-slate-700/50 overflow-hidden conv-${kind}`
-      + (step.is_compaction_call ? ' compaction-call-card' : '');
-    if (depth > 0) div.style.marginLeft = (depth * 24) + 'px';
-    div.innerHTML = buildStepHTML(step);
-    fragment.appendChild(div);
-
-    // Subagent end point: render its produced output (expanded) right after its
-    // last step, so the start (input) and end (output) bound the subagent block.
-    for (const ex of (step.exits || [])) {
-      const eb = document.createElement('div');
-      eb.className = 'exit-banner';
-      eb.style.marginLeft = (depth * 24) + 'px';
-      const preview = ex.result_preview || '';
-      const retLink = (ex.returns_at != null)
-        ? ` <a href="#step-${ex.returns_at}" class="text-emerald-300 hover:underline">result returns to step ${ex.returns_at} ⤶</a>`
-        : ' <span class="text-slate-500">(no return captured — trial ended inside the subagent)</span>';
-      const body = preview
-        ? `<details open><summary class="cursor-pointer text-violet-300/80">↳ output it produced (${fmtTok(ex.result_len || preview.length)} chars)</summary>` +
-          `<pre class="boundary-body">${esc(preview)}${ex.result_truncated ? '\n…(truncated)' : ''}</pre></details>`
-        : '';
-      eb.innerHTML = `<div class="exit-banner-head">⑂ subagent:${esc(ex.subagent_type || '?')} (${esc(ex.conversation_id)}) ends here ·${retLink}</div>${body}`;
-      fragment.appendChild(eb);
-    }
+    for (const n of stepNodes(allSteps[i], true)) fragment.appendChild(n);
   }
   container.appendChild(fragment);
   renderedCount = end;
   isLoading = false;
   updateStatus();
+}
+
+// Render one step to an ordered array of DOM nodes: any compaction / subagent-
+// return banners that precede it, then the step card (or a demoted background
+// line), then any subagent exit banners that follow it. ``indent`` applies the
+// depth margin for the flat (non-grouped) stream; grouped lanes indent via their
+// container instead, so they pass indent=false.
+function stepNodes(step, indent) {
+  const nodes = [];
+  const conv = step.conversation || {};
+  const kind = conv.kind || 'root';
+  const depth = conv.depth || 0;
+  const ml = indent ? (depth * 24) + 'px' : '';
+
+  // Compaction CALL: a real model call whose input is the full history + a
+  // "summarize the conversation" instruction and whose output (below) is the
+  // summary. It renders as a normal step card; this banner explains its role.
+  if (step.is_compaction_call) {
+    const div = document.createElement('div');
+    div.className = 'compaction-divider';
+    div.style.marginLeft = ml;
+    div.innerHTML = `<span>✂ compaction call — the model summarizes the conversation (input ${fmtTok(step.tokens.in)} = full history + summarize prompt → output below = the summary, reused as the next call's context)</span>`;
+    nodes.push(div);
+  }
+  // Continuation: the next call resumes from that summary (input collapsed).
+  if (step.is_compaction_resume) {
+    const div = document.createElement('div');
+    div.className = 'compaction-resume';
+    div.style.marginLeft = ml;
+    div.innerHTML = `<span>↩ resumes from the compaction summary — context now ${fmtTok(step.tokens.in)} in</span>`;
+    nodes.push(div);
+  }
+
+  // Subagent result folding back into this step's context: the literal point
+  // where a subagent's output enters the parent agent's prompt. The full text
+  // is shown expanded at the subagent's own last step, so this stays a concise
+  // marker linking back to it.
+  for (const ret of (step.returns || [])) {
+    const div = document.createElement('div');
+    div.className = 'return-banner';
+    div.style.marginLeft = ml;
+    const fromLink = (ret.first_index != null)
+      ? ` <a href="#step-${ret.first_index}" class="text-violet-300 hover:underline">(produced at step ${ret.first_index})</a>` : '';
+    div.innerHTML = `<div class="return-banner-head">⤶ subagent:${esc(ret.subagent_type || '?')} (${esc(ret.conversation_id)}) output (${fmtTok(ret.result_len || 0)} chars) merged into context here${fromLink}</div>`;
+    nodes.push(div);
+  }
+
+  // Background/auxiliary calls: a single demoted line, not a full card.
+  if (kind === 'background') {
+    const line = document.createElement('div');
+    line.id = `step-${step.index}`;
+    line.className = 'bg-call-line';
+    line.style.marginLeft = ml;
+    const txt = (step.blocks.find(b => b.type === 'text') || {}).content || '';
+    line.innerHTML = `<span>·</span><span class="conv-badge background">background</span>
+      <span>step ${step.index} · ${fmtTok(step.tokens.in)} in / ${fmtTok(step.tokens.out)} out</span>
+      <span class="text-slate-600 truncate">${esc(String(txt).slice(0, 80))}</span>
+      <button type="button" data-context-step-index="${step.index}" class="ml-auto text-slate-600 hover:text-slate-300" title="System prompt, messages & raw">prompt+ctx</button>`;
+    nodes.push(line);
+    return nodes;
+  }
+
+  const div = document.createElement('div');
+  div.id = `step-${step.index}`;
+  div.className = `step-card bg-surface rounded-xl border border-slate-700/50 overflow-hidden conv-${kind}`
+    + (step.is_compaction_call ? ' compaction-call-card' : '');
+  if (indent && depth > 0) div.style.marginLeft = ml;
+  div.innerHTML = buildStepHTML(step);
+  // NOTE: director-injected hints are highlighted IN PLACE inside the observation
+  // (escHL, yellow 💉 span) where the agent actually saw them — we deliberately do
+  // NOT add a separate banner here, which used to render the same hint a second time
+  // on the adjacent step ("step N obs + step N+1 banner" = the same hint shown twice).
+  nodes.push(div);
+
+  // Subagent end point: render its produced output (expanded) right after its
+  // last step, so the start (input) and end (output) bound the subagent block.
+  for (const ex of (step.exits || [])) {
+    const eb = document.createElement('div');
+    eb.className = 'exit-banner';
+    eb.style.marginLeft = ml;
+    const preview = ex.result_preview || '';
+    const retLink = (ex.returns_at != null)
+      ? ` <a href="#step-${ex.returns_at}" class="text-emerald-300 hover:underline">result returns to step ${ex.returns_at} ⤶</a>`
+      : ' <span class="text-slate-500">(no return captured — trial ended inside the subagent)</span>';
+    const body = preview
+      ? `<details open><summary class="cursor-pointer text-violet-300/80">↳ output it produced (${fmtTok(ex.result_len || preview.length)} chars)</summary>` +
+        `<pre class="boundary-body">${esc(preview)}${ex.result_truncated ? '\n…(truncated)' : ''}</pre></details>`
+      : '';
+    eb.innerHTML = `<div class="exit-banner-head">⑂ subagent:${esc(ex.subagent_type || '?')} (${esc(ex.conversation_id)}) ends here ·${retLink}</div>${body}`;
+    nodes.push(eb);
+  }
+  return nodes;
+}
+
+// ========== GROUPED (de-interleaved) RENDERING ==========
+// A trial that runs concurrent conversations (Task subagents, or independent
+// top-level agents like Cairn's workers) lands in proxy.jsonl interleaved by
+// arrival order. Rendering that flat stream puts sibling conversations in one
+// column, jumbled. Grouped mode instead renders each conversation as a
+// contiguous, collapsible lane — subagents nested under the parent step that
+// spawned them, independent agents as sibling lanes ordered by first appearance.
+function isGroupedMode() {
+  const s = trajectoryStructure || {};
+  return (s.num_agents || 0) > 0 || (s.num_subagents || 0) > 0;
+}
+
+// Distinct lane tint per concurrent conversation (root stays neutral slate).
+const LANE_HUES = [265, 190, 45, 330, 150, 15, 280, 95, 210, 60];
+function laneColor(i) { return `hsl(${LANE_HUES[i % LANE_HUES.length]} 70% 68%)`; }
+
+// Flatten the forest into render order: each top-level conversation (root or
+// independent agent), ordered by first appearance; each subagent spliced in
+// right after the parent step that spawned it. Returns a list of
+// {t:'group-start'|'step'|'group-end', ...} items.
+function computeDisplayOrder(steps, conversations) {
+  const stepByIdx = new Map(steps.map(s => [s.index, s]));
+  const convStepIdx = new Map();       // conv id -> sorted [global step index]
+  for (const s of steps) {
+    const cid = (s.conversation || {}).id;
+    if (cid == null) continue;
+    if (!convStepIdx.has(cid)) convStepIdx.set(cid, []);
+    convStepIdx.get(cid).push(s.index);
+  }
+  for (const arr of convStepIdx.values()) arr.sort((a, b) => a - b);
+  const childrenOf = (id) => (conversations || [])
+    .filter(c => c.parent_id === id && c.kind === 'subagent')
+    .sort((a, b) => (a.first_index ?? 0) - (b.first_index ?? 0));
+
+  const out = [];
+  let hue = 0;
+  function emit(conv, laneHue) {
+    out.push({ t: 'group-start', conv, hue: laneHue });
+    const idxs = convStepIdx.get(conv.id) || [];
+    // Subagents keyed to the parent step index that spawned them (fall back to
+    // the step just before the child's first call).
+    const kidsBySpawn = new Map();
+    for (const k of childrenOf(conv.id)) {
+      const sp = (k.spawned_by && k.spawned_by.parent_index != null)
+        ? k.spawned_by.parent_index : ((k.first_index ?? 1) - 1);
+      if (!kidsBySpawn.has(sp)) kidsBySpawn.set(sp, []);
+      kidsBySpawn.get(sp).push(k);
+    }
+    for (const idx of idxs) {
+      const st = stepByIdx.get(idx);
+      if (st) out.push({ t: 'step', step: st, conv, hue: laneHue });
+      for (const k of (kidsBySpawn.get(idx) || [])) emit(k, laneHue);
+    }
+    out.push({ t: 'group-end', conv, hue: laneHue });
+  }
+  const tops = (conversations || [])
+    .filter(c => !c.parent_id && c.kind !== 'background')
+    .sort((a, b) => (a.first_index ?? 0) - (b.first_index ?? 0));
+  for (const c of tops) emit(c, c.kind === 'root' ? -1 : hue++);
+  // Background one-shots: appended as demoted lines at the end (they are the
+  // harness's own auxiliary calls, not part of any agent's reasoning).
+  const bg = (conversations || []).filter(c => c.kind === 'background');
+  for (const c of bg) {
+    for (const idx of (convStepIdx.get(c.id) || [])) {
+      const st = stepByIdx.get(idx);
+      if (st) out.push({ t: 'step', step: st, conv: c, hue: -1, bareBackground: true });
+    }
+  }
+  return out;
+}
+
+function laneHeaderHTML(conv, hue) {
+  const isSub = conv.kind === 'subagent';
+  const color = hue < 0 ? '#94a3b8' : laneColor(hue);
+  const label = conv.kind === 'root' ? 'root agent'
+    : isSub ? `⑂ subagent: ${esc(conv.subagent_type || '?')}`
+    : `‖ agent`;
+  const inTok = (conv.usage && conv.usage.input_tokens) ? fmtTok(conv.usage.input_tokens) : '0';
+  const spawnedAt = (conv.spawned_by && conv.spawned_by.parent_index != null) ? conv.spawned_by.parent_index : null;
+  const fromLink = (spawnedAt != null)
+    ? ` · spawned by <a href="#step-${spawnedAt}" class="hover:underline" style="color:${color}">step ${spawnedAt}</a>` : '';
+  const retLink = (conv.returns_at != null)
+    ? ` · <a href="#step-${conv.returns_at}" class="text-emerald-300 hover:underline">result merges at step ${conv.returns_at} ⤶</a>` : '';
+  const parallelTag = (conv.kind === 'agent')
+    ? ` <span style="color:${color};opacity:.85">‖ concurrent</span>` : '';
+  return `<div class="lane-head" style="border-color:${color};">
+    <button type="button" class="lane-toggle" aria-expanded="true" style="color:${color}">▾</button>
+    <span class="lane-label" style="color:${color}">${label}</span>
+    <span class="lane-id" style="background:${color}22;color:${color}">${esc(conv.id)}</span>
+    <span class="lane-meta">${conv.num_calls || (conv.usage && conv.usage.num_requests) || '?'} calls · ${inTok} in${conv.num_compactions ? ' · ✂' + conv.num_compactions : ''}${parallelTag}${fromLink}${retLink}</span>
+  </div>`;
+}
+
+async function renderGroupedAll() {
+  await loadAllSteps();
+  const container = document.getElementById('trajectory-container');
+  container.innerHTML = '';
+  const order = computeDisplayOrder(allSteps, trajectoryConversations);
+  const rootFrag = document.createDocumentFragment();
+  let curBody = null;      // current lane body to append steps into
+  const laneStack = [];    // support nested subagent lanes
+  for (const item of order) {
+    if (item.t === 'group-start') {
+      const lane = document.createElement('div');
+      lane.className = 'conv-lane' + (item.conv.kind === 'root' ? ' conv-lane-root' : '');
+      const color = item.hue < 0 ? '#334155' : laneColor(item.hue);
+      lane.style.borderLeftColor = color;
+      lane.innerHTML = laneHeaderHTML(item.conv, item.hue);
+      const body = document.createElement('div');
+      body.className = 'lane-body';
+      lane.appendChild(body);
+      // Nest under the current lane body (subagents) or at the top level.
+      (curBody || rootFrag).appendChild(lane);
+      laneStack.push({ lane, body: curBody });
+      curBody = body;
+    } else if (item.t === 'group-end') {
+      const popped = laneStack.pop();
+      curBody = popped ? popped.body : null;
+    } else if (item.t === 'step') {
+      const target = item.bareBackground ? rootFrag : (curBody || rootFrag);
+      for (const n of stepNodes(item.step, false)) target.appendChild(n);
+    }
+  }
+  container.appendChild(rootFrag);
+  renderedCount = allSteps.length;
+  wireLaneToggles(container);
+  updateStatus();
+}
+
+function wireLaneToggles(container) {
+  container.querySelectorAll('.lane-toggle').forEach(btn => {
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', () => {
+      const lane = btn.closest('.conv-lane');
+      const body = lane && lane.querySelector(':scope > .lane-body');
+      if (!body) return;
+      const collapsed = body.style.display === 'none';
+      body.style.display = collapsed ? '' : 'none';
+      btn.textContent = collapsed ? '▾' : '▸';
+      btn.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
+    });
+  });
 }
 
 async function renderAllRemaining() {
@@ -1121,8 +1438,14 @@ function buildStepHTML(step) {
   const toolNames = step.blocks.filter(b => b.type === 'tool_use').map(b => b.name).join(', ');
   const _conv = step.conversation || {};
   const _kind = _conv.kind || 'root';
-  const convBadgeHTML = _kind === 'root' ? '' :
-    `<span class="conv-badge ${_kind}" title="conversation ${esc(_conv.id || '')} (depth ${_conv.depth || 0})">${_kind === 'subagent' ? 'subagent:' + esc(_conv.subagent_type || '?') : esc(_kind)}</span>`;
+  // Real LangGraph node (from the agent's X-Cage-Node header, recorded per
+  // request). When present it IS the ground-truth structure, so prefer it over
+  // the heuristic conversation forest's guessed "subagent:?" badge.
+  const nodeBadge = step.node
+    ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30" title="LangGraph node">▸ ${esc(step.node)}</span>`
+    : '';
+  const convBadgeHTML = nodeBadge || (_kind === 'root' ? '' :
+    `<span class="conv-badge ${_kind}" title="conversation ${esc(_conv.id || '')} (depth ${_conv.depth || 0})">${_kind === 'subagent' ? 'subagent:' + esc(_conv.subagent_type || '?') : esc(_kind)}</span>`);
   // When this step opens a subagent conversation, show where it was spawned from
   // and where its result returns — so the delegation is navigable in both directions.
   let subagentEntryHTML = '';
@@ -1157,8 +1480,8 @@ function buildStepHTML(step) {
       <span class="text-xs text-slate-600">${esc(toolNames)}</span>
     </div>
     <div class="flex items-center gap-2">
-      <button type="button" data-context-step-index="${step.index}" class="px-2 py-0.5 text-xs bg-slate-700/50 border border-slate-600 rounded hover:bg-slate-600 text-slate-400 hover:text-white transition-colors" title="View raw JSON">
-        JSON
+      <button type="button" data-context-step-index="${step.index}" class="px-2 py-0.5 text-xs bg-slate-700/50 border border-slate-600 rounded hover:bg-slate-600 text-slate-400 hover:text-white transition-colors" title="System prompt, full messages & raw record">
+        prompt + context
       </button>
       <span class="text-xs text-slate-500">${fmtTok(step.cumulative.in)} / ${fmtTok(step.cumulative.out)}</span>
     </div>
@@ -1166,17 +1489,37 @@ function buildStepHTML(step) {
 
   html += `<div class="step-body p-4 space-y-2.5">`;
   html += subagentEntryHTML;
+  // First time this node/agent appears: surface its system + user prompt,
+  // default-expanded but height-capped (a sliding window) so it stays scannable.
+  if (step.node_first && (step.system_prompt || step.user_prompt)) {
+    html += `<div class="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] overflow-hidden">
+      <div class="px-4 py-1.5 text-xs font-semibold text-amber-300/90 border-b border-amber-500/15">${step.node ? '▸ ' + esc(step.node) + ' — ' : ''}agent setup · first appearance</div>
+      ${step.system_prompt ? `<div class="px-4 py-2"><div class="text-[10px] uppercase tracking-wide text-amber-500/70 mb-0.5">system prompt <span class="text-slate-600 normal-case">(${step.system_prompt.length}c)</span></div><pre class="text-xs text-slate-300 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2 max-h-56 overflow-y-auto">${esc(step.system_prompt)}</pre></div>` : ''}
+      ${step.user_prompt ? `<div class="px-4 pb-2"><div class="text-[10px] uppercase tracking-wide text-amber-500/70 mb-0.5">user prompt <span class="text-slate-600 normal-case">(${step.user_prompt.length}c)</span></div><pre class="text-xs text-slate-300 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2 max-h-56 overflow-y-auto">${esc(step.user_prompt)}</pre></div>` : ''}
+    </div>`;
+  }
   if (!step.blocks.length) {
     html += `<div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
       <div class="text-sm font-medium text-amber-200">No response content captured for this step.</div>
       <div class="mt-1 text-xs text-amber-100/80">Open JSON to inspect the raw proxy record.</div>
     </div>`;
   }
+  let hasToolUse = false;
   for (const block of step.blocks) {
     if (block.type === 'thinking') html += thinkingHTML(block.content);
     else if (block.type === 'text') html += textHTML(block.content);
-    else if (block.type === 'tool_use') html += toolHTML(block);
+    else if (block.type === 'tool_use') { html += toolHTML(block); hasToolUse = true; }
   }
+  // Result of this step's action, for agents whose "tools" run in Python and
+  // feed the result back as the next message (so no native tool_use/tool_result
+  // block exists). Native-tool agents already show results inline above, so skip
+  // those. Rendered below the action, in the same style as a tool result.
+  if (step.result && !hasToolUse) html += resultHTML(step.result);
+  // Native-tool steps render block.result (this step's own tool output) and SKIP step.result.
+  // But the director reminder is appended to step.result (the observation fed into the NEXT
+  // request) — NOT to block.result — so on those steps it would never show. Surface just the
+  // reminder (deduped, first-occurrence only) regardless of hasToolUse.
+  else if (step.result) html += directorReminderHTML(step.result);
   for (const childId of (step.spawns || [])) {
     const child = (trajectoryConversations || []).find(c => c.id === childId);
     if (!child) continue;
@@ -1241,14 +1584,18 @@ function toolHTML(block) {
     const rlen = block.result.length;
     const isShort = rlen < 800;
     const sizeLabel = rlen > 1000 ? fmtTok(rlen) + ' chars' : rlen + 'c';
+    const _hl = escHL(block.result);            // also sets _escHLnew
+    const _new = _escHLnew;
     if (isShort) {
       resultHtml = `<div class="border-t border-cyan-900/30 px-4 py-2">
-        <pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2 max-h-60 overflow-y-auto">${esc(block.result)}</pre>
+        <pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2 max-h-60 overflow-y-auto">${_hl}</pre>
       </div>`;
     } else {
-      resultHtml = `<details class="border-t border-cyan-900/30">
-        <summary class="px-4 py-1.5 text-xs text-slate-400 hover:text-slate-300">Result <span class="text-slate-600">(${sizeLabel})</span></summary>
-        <div class="px-4 pb-2"><pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2.5 max-h-80 overflow-y-auto">${esc(block.result)}</pre></div>
+      // auto-expand (and flag with 💉) results that carry a NEW director hint, so the
+      // ~10 director decision points aren't hidden inside collapsed observations.
+      resultHtml = `<details class="border-t border-cyan-900/30"${_new ? ' open' : ''}>
+        <summary class="px-4 py-1.5 text-xs text-slate-400 hover:text-slate-300">${_new ? '<span style="color:#fbbf24;font-weight:700;">💉 Result (director hint here)</span>' : 'Result'} <span class="text-slate-600">(${sizeLabel})</span></summary>
+        <div class="px-4 pb-2"><pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2.5 max-h-80 overflow-y-auto">${_hl}</pre></div>
       </details>`;
     }
   }
@@ -1262,6 +1609,38 @@ function toolHTML(block) {
     </details>
     ${resultHtml}
   </div>`;
+}
+
+// Result of a Python-side "tool" (no native tool_use block) — fed back as the
+// next message. Same visual language as a tool result above.
+// Render ONLY the director reminder that lives inside step.result (when the full step.result
+// isn't shown because the step has a native tool_use). Deduped via escHL/_hlSeen so each
+// distinct hint appears once, on its first step. Returns '' if no NEW hint here.
+function directorReminderHTML(text) {
+  const m = text.match(/<system-reminder>[\s\S]*?internal triage context[\s\S]*?<\/system-reminder>/);
+  if (!m) return '';
+  const hl = escHL(m[0]);          // escapes + highlights + sets _escHLnew + updates _hlSeen
+  if (!_escHLnew) return '';       // a repeat of an already-shown hint — don't clutter
+  return `<div class="px-4 py-2" style="border-top:1px solid rgba(245,158,11,.25);">
+    <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:3px;">💉 director hint (injected into this observation; scrubbed from training data)</div>
+    <pre class="text-xs whitespace-pre-wrap break-words leading-relaxed">${hl}</pre>
+  </div>`;
+}
+
+function resultHTML(text) {
+  const rlen = text.length;
+  const sizeLabel = rlen > 1000 ? fmtTok(rlen) + ' chars' : rlen + 'c';
+  if (rlen < 800) {
+    return `<div class="tool-block bg-cyan-950/20 rounded-lg overflow-hidden">
+      <div class="px-4 py-1.5 text-xs text-cyan-300/70 border-b border-cyan-900/30">↳ result</div>
+      <div class="px-4 py-2"><pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2 max-h-60 overflow-y-auto">${escHL(text)}</pre></div>
+    </div>`;
+  }
+  const _hl = escHL(text); const _new = _escHLnew;
+  return `<details class="tool-block bg-cyan-950/20 rounded-lg overflow-hidden"${_new ? ' open' : ''}>
+    <summary class="px-4 py-1.5 text-xs text-cyan-300/70 hover:text-cyan-200">${_new ? '<span style="color:#fbbf24;font-weight:700;">💉 ↳ result (director hint here)</span>' : '↳ result'} <span class="text-slate-600">(${sizeLabel})</span></summary>
+    <div class="px-4 pb-2"><pre class="text-xs text-slate-400 whitespace-pre-wrap break-words leading-relaxed bg-black/20 rounded p-2.5 max-h-80 overflow-y-auto">${_hl}</pre></div>
+  </details>`;
 }
 
 // ========== JSON PANEL ==========
@@ -1313,13 +1692,22 @@ function renderContextDetail(payload, stepIndex) {
   const content = response.content || [];
   let html = renderTokenUsage(summary.tokens || {});
 
+  // ── Readable: one unified view. Agent response + full conversation context
+  // (every message broken into its thinking/response/tool_use/tool_result
+  // fields), with system prompt + tool definitions + context diff folded in as
+  // secondary sections. (Merges the old "Readable evidence" + "Tool timeline".)
   html += '<div data-context-mode-panel="readable">';
-  html += '<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Readable evidence</div>';
   if (content.length || response.error) {
     html += section('Agent response', renderResponseContent(content, response), true, `${response.tool_names?.length || 0} tools`);
   }
   if (messages.length) {
     html += section('Conversation context', renderMessages(messages), true, `${messages.length} messages`);
+  }
+  if (request.system) {
+    html += section('System prompt', contentBlock(request.system), false, `${request.system_chars || request.system.length} chars`);
+  }
+  if (tools.length) {
+    html += section('Available tools', renderRequestTools(tools), false, `${tools.length} tools`);
   }
   html += section(
     'Context changes',
@@ -1330,43 +1718,19 @@ function renderContextDetail(payload, stepIndex) {
   );
   html += '</div>';
 
-  html += '<div data-context-mode-panel="tools" class="hidden">';
-  html += '<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Tool timeline</div>';
-  if (tools.length) {
-    html += section('Available tools', renderRequestTools(tools), true, `${tools.length} tools`);
-  } else {
-    html += '<div class="text-xs text-slate-500 py-3">No tool definitions recorded for this step.</div>';
-  }
-  if (request.system) {
-    html += section('System Prompt', `<div class="tap-pre">${esc(request.system)}</div>`, false, `${request.system_chars || request.system.length} chars`);
-  }
-  if (messages.length) {
-    html += section('Messages', renderMessages(messages), false, `${messages.length} messages`);
-  }
-  html += '</div>';
-
+  // ── Raw JSON: the whole proxy record as a colour-coded, collapsible tree.
   html += '<div data-context-mode-panel="raw" class="hidden">';
-  html += '<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Raw JSON</div>';
-  html += '<div class="ctx-action-bar">';
-  html += `<button type="button" class="ctx-action-btn" data-context-action="copy-request">Request JSON</button>`;
-  html += `<button type="button" class="ctx-action-btn" data-context-action="scroll-section" data-context-section="context-diff">Diff with Prev</button>`;
-  html += `<button type="button" class="ctx-action-btn" data-context-action="scroll-section" data-context-section="full-json">Full JSON</button>`;
+  html += '<div class="jt-toolbar">';
+  html += `<button type="button" class="ctx-action-btn" data-context-action="jt-expand">Expand all</button>`;
+  html += `<button type="button" class="ctx-action-btn" data-context-action="jt-collapse">Collapse all</button>`;
+  html += `<button type="button" class="ctx-action-btn" data-context-action="copy-request">Copy JSON</button>`;
   html += '</div>';
-  html += section(
-    'Context Diff',
-    renderContextDiff(diff),
-    false,
-    diff.previous_step_index === null || diff.previous_step_index === undefined ? 'no previous' : `from step ${diff.previous_step_index}`,
-    'context-diff',
-  );
-  html += section('Full JSON', `<pre id="ctx-json" class="json-view tap-pre">${syntaxColorJSON(raw)}</pre>`, false, 'raw', 'full-json');
+  html += `<div id="ctx-json" class="jt">${renderJsonTree(raw, null, 0)}</div>`;
   html += '</div>';
 
   document.getElementById('ctx-detail').innerHTML = html;
   setContextMode('readable');
   document.getElementById('json-scroll').scrollTop = 0;
-  document.getElementById('json-search').value = '';
-  document.getElementById('json-search-count').textContent = '';
 }
 
 function setContextMode(mode) {
@@ -1534,38 +1898,80 @@ function renderMessageCard(message, options) {
   return `<div class="tap-msg ${cls}">${header}${body}</div>`;
 }
 
+// A plaintext message body. Long ones (the setup system-reminder / skills wall,
+// pasted logs) are height-capped with an inline "show full message" so opening a
+// message never turns the panel into an endless scroll.
+function contentBlock(text) {
+  const t = String(text == null ? '' : text);
+  if (t.length <= 1400) return `<div class="content-block">${esc(t)}</div>`;
+  return `<div class="content-block capped">${esc(t)}</div>`
+    + `<span class="content-more" data-content-more>▾ show full message (${t.length} chars)</span>`;
+}
+
+// "show full message" toggles the height cap on a long plaintext body.
+document.addEventListener('click', (e) => {
+  const more = e.target.closest('[data-content-more]');
+  if (!more) return;
+  const body = more.previousElementSibling;
+  if (!body || !body.classList.contains('content-block')) return;
+  const open = body.classList.toggle('open');
+  more.textContent = open ? '▴ collapse' : '▾ show full message';
+});
+
 function renderContent(content, role) {
-  if (typeof content === 'string') return `<div class="content-block">${esc(content)}</div>`;
-  if (!Array.isArray(content)) return `<pre class="tap-pre">${esc(JSON.stringify(content, null, 2))}</pre>`;
-  return content.map(block => {
-    if (!block || typeof block !== 'object') return `<div class="content-block">${esc(String(block))}</div>`;
-    if (block.type === 'text' || block.type === 'input_text' || block.type === 'output_text') {
-      const text = block.text || '';
-      return text ? `<div class="content-block">${esc(text)}</div>` : '';
-    }
-    if (block.type === 'thinking') {
-      const text = block.thinking || block.text || '';
-      return text ? `<div class="content-block"><span class="thinking-label">thinking</span><div class="tap-pre">${esc(text)}</div></div>` : '';
-    }
-    if (block.type === 'tool_use') {
-      return `<div class="content-block"><span class="tool-use-label">${esc(block.name || 'tool_use')}</span><pre class="tap-pre">${esc(JSON.stringify(block.input || {}, null, 2))}</pre></div>`;
-    }
-    if (block.type === 'tool_result') {
-      return `<div class="content-block"><span class="tool-use-label">result ${esc(block.tool_use_id || '')}</span>${renderToolResult(block.content)}</div>`;
-    }
-    return `<pre class="tap-pre">${esc(JSON.stringify(block, null, 2))}</pre>`;
-  }).join('');
+  if (typeof content === 'string') return contentBlock(content);
+  if (!Array.isArray(content)) return `<div class="jt">${renderJsonTree(content, null, 1)}</div>`;
+  return content.map(block => renderBlock(block, role)).join('');
+}
+
+function blockShell(cls, headHtml, bodyHtml) {
+  return `<div class="tap-block ${cls}"><div class="tap-block-head">${headHtml}</div><div class="tap-block-body">${bodyHtml}</div></div>`;
+}
+
+// One content block → a labelled unit exposing its type + fields, so the
+// message's schema (thinking / response / tool_use args / tool_result) is
+// visible instead of a flat text blob.
+function renderBlock(block, role) {
+  if (!block || typeof block !== 'object') return `<div class="content-block">${esc(String(block))}</div>`;
+  const type = block.type || '';
+  if (type === 'text' || type === 'input_text' || type === 'output_text') {
+    const text = block.text || '';
+    if (!text) return '';
+    const kind = role === 'assistant' ? 'response' : 'text';
+    return blockShell('text', `<span class="tap-block-kind">${kind}</span>`, contentBlock(text));
+  }
+  if (type === 'thinking' || type === 'redacted_thinking') {
+    const text = block.thinking || block.text || (type === 'redacted_thinking' ? '[redacted]' : '');
+    if (!text) return '';
+    return blockShell('thinking', `<span class="tap-block-kind">💭 thinking</span>`, contentBlock(text));
+  }
+  if (type === 'tool_use' || type === 'server_tool_use') {
+    const name = block.name || 'tool_use';
+    const id = block.id ? `<span class="tap-block-id">${esc(block.id)}</span>` : '';
+    const head = `<span class="tap-block-kind">🔧 tool_use</span><span class="tap-block-name">${esc(name)}</span>${id}`;
+    return blockShell('tooluse', head, `<div class="jt">${renderJsonTree(block.input || {}, 'input', 1)}</div>`);
+  }
+  if (type === 'tool_result') {
+    const id = block.tool_use_id ? `<span class="tap-block-id">${esc(block.tool_use_id)}</span>` : '';
+    const err = block.is_error ? `<span class="tap-block-err">error</span>` : '';
+    const head = `<span class="tap-block-kind">↩ tool_result</span>${err}${id}`;
+    return blockShell('toolresult', head, renderToolResult(block.content));
+  }
+  // Unknown block type → show its structure as a tree so the schema is still visible.
+  return blockShell('text', `<span class="tap-block-kind">${esc(type || 'block')}</span>`, `<div class="jt">${renderJsonTree(block, null, 1)}</div>`);
 }
 
 function renderToolResult(content) {
-  if (typeof content === 'string') return `<div class="tap-pre">${esc(content)}</div>`;
+  if (content == null) return '<div class="text-xs text-slate-500">empty</div>';
+  if (typeof content === 'string') return contentBlock(content);
   if (Array.isArray(content)) {
     return content.map(item => {
-      if (item && item.type === 'text') return `<div class="tap-pre">${esc(item.text || '')}</div>`;
-      return `<pre class="tap-pre">${esc(JSON.stringify(item, null, 2))}</pre>`;
+      if (item && item.type === 'text') return contentBlock(item.text || '');
+      if (item && typeof item === 'object') return `<div class="jt">${renderJsonTree(item, null, 1)}</div>`;
+      return contentBlock(String(item));
     }).join('');
   }
-  return `<pre class="tap-pre">${esc(JSON.stringify(content, null, 2))}</pre>`;
+  return `<div class="jt">${renderJsonTree(content, null, 1)}</div>`;
 }
 
 function renderResponseContent(content, response) {
@@ -1634,49 +2040,53 @@ function renderLineDiff(oldText, newText) {
   return `<div class="sbs-diff"><div class="sbs-header old">OLD</div><div class="sbs-header new">NEW</div>${rows.join('')}</div>`;
 }
 
-function syntaxColorJSON(obj) {
-  const s = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
-  let out = '';
-  let i = 0;
-  while (i < s.length) {
-    const c = s[i];
-    if (c === '"') {
-      let j = i + 1;
-      while (j < s.length) {
-        if (s[j] === '\\') { j += 2; continue; }
-        if (s[j] === '"') break;
-        j++;
-      }
-      j++;
-      let k = j;
-      while (k < s.length && s[k] === ' ') k++;
-      const cls = k < s.length && s[k] === ':' ? 'text-blue-300' : 'text-green-300';
-      out += `<span class="${cls}">${esc(s.slice(i, j))}</span>`;
-      i = j;
-    } else if (c === '-' || (c >= '0' && c <= '9')) {
-      const match = s.slice(i).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
-      if (match) {
-        out += `<span class="text-purple-400">${match[0]}</span>`;
-        i += match[0].length;
-      } else {
-        out += esc(c);
-        i++;
-      }
-    } else if (s.slice(i, i + 4) === 'true') {
-      out += '<span class="text-orange-300">true</span>';
-      i += 4;
-    } else if (s.slice(i, i + 5) === 'false') {
-      out += '<span class="text-orange-300">false</span>';
-      i += 5;
-    } else if (s.slice(i, i + 4) === 'null') {
-      out += '<span class="text-slate-500">null</span>';
-      i += 4;
-    } else {
-      out += esc(c);
-      i++;
-    }
+// Recursive collapsible + colour-coded JSON viewer. Objects/arrays are <details>
+// (open for the top couple of levels, folded deeper so a big record stays
+// scannable); primitives render inline coloured by type; long strings truncate
+// with a click-to-expand. Used for the Raw JSON tab and for tool_use inputs so
+// the call schema is visible.
+function renderJsonTree(value, keyLabel, depth) {
+  depth = depth || 0;
+  const keyHtml = keyLabel != null ? `<span class="jt-key">${esc(keyLabel)}</span><span class="jt-punc">: </span>` : '';
+  if (value === null || value === undefined) return `<div class="jt-leaf">${keyHtml}<span class="jt-null">${value === null ? 'null' : 'undefined'}</span></div>`;
+  const t = typeof value;
+  if (t === 'number') return `<div class="jt-leaf">${keyHtml}<span class="jt-num">${esc(String(value))}</span></div>`;
+  if (t === 'boolean') return `<div class="jt-leaf">${keyHtml}<span class="jt-bool">${value}</span></div>`;
+  if (t === 'string') return `<div class="jt-leaf">${keyHtml}${jtString(value)}</div>`;
+  if (Array.isArray(value)) {
+    if (!value.length) return `<div class="jt-leaf">${keyHtml}<span class="jt-brace">[ ]</span></div>`;
+    const open = ' open';   // default: fully expanded (Collapse all folds it back)
+    const kids = value.map((v, i) => renderJsonTree(v, String(i), depth + 1)).join('');
+    return `<details class="jt-node"${open}><summary><span class="jt-tw"></span>${keyHtml}<span class="jt-brace">[</span><span class="jt-count">${value.length}</span><span class="jt-brace">]</span></summary><div class="jt-children">${kids}</div></details>`;
   }
-  return out;
+  const keys = Object.keys(value);
+  if (!keys.length) return `<div class="jt-leaf">${keyHtml}<span class="jt-brace">{ }</span></div>`;
+  const open = ' open';   // default: fully expanded (Collapse all folds it back)
+  // Key hint — CSS shows it only while the node is collapsed, so the default
+  // expanded view doesn't duplicate the child keys shown underneath.
+  const preview = `<span class="jt-preview jt-preview-collapsed"> ${esc(keys.slice(0, 5).join(', '))}${keys.length > 5 ? '…' : ''}</span>`;
+  const kids = keys.map(k => renderJsonTree(value[k], k, depth + 1)).join('');
+  return `<details class="jt-node"${open}><summary><span class="jt-tw"></span>${keyHtml}<span class="jt-brace">{</span><span class="jt-count">${keys.length}</span><span class="jt-brace">}</span>${preview}</summary><div class="jt-children">${kids}</div></details>`;
+}
+
+// A JSON string leaf, quoted like real JSON; long ones clip with a click-to-reveal.
+function jtString(s) {
+  const disp = JSON.stringify(String(s));   // surrounding quotes + escaped control chars
+  if (disp.length <= 600) return `<span class="jt-str">${esc(disp)}</span>`;
+  return `<span class="jt-str jt-str-clip" data-jt-full="${esc(disp)}">${esc(disp.slice(0, 600))}…</span>`
+    + `<span class="jt-str-more" data-jt-str-more> ▸ ${disp.length} chars</span>`;
+}
+
+// Reveal a clipped JSON-tree string leaf / drive Raw JSON expand-collapse-all.
+document.addEventListener('click', (e) => {
+  const more = e.target.closest('[data-jt-str-more]');
+  if (more) {
+    const clip = more.previousElementSibling;
+    if (clip && clip.dataset.jtFull != null) { clip.textContent = clip.dataset.jtFull; clip.classList.remove('jt-str-clip'); more.remove(); }
+  }
+});
+function jtToggleAll(open) {
+  document.querySelectorAll('#ctx-json .jt-node').forEach(d => { d.open = open; });
 }
 
 function copyContextRequest(btn) {
@@ -1701,76 +2111,62 @@ function closePanel() {
   activeStepIndex = -1;
 }
 
-// ========== JSON PANEL SEARCH ==========
-const jsonSearchInput = document.getElementById('json-search');
-const jsonSearchCountEl = document.getElementById('json-search-count');
-let jsonSearchMatches = [];
-let jsonSearchIdx = -1;
+// ========== SEARCH HIGHLIGHT (shared) ==========
+// Open every collapsible ancestor of `el` — a native <details> (Setup context,
+// Earlier messages, a capped body) or an element a toggle hid via inline
+// display:none (lane / step bodies) — so a hit deep in a folded section is
+// actually brought on screen instead of scrolled to blind.
+function revealAncestors(el) {
+  let p = el;
+  while (p && p !== document.body) {
+    if (p.tagName === 'DETAILS' && !p.open) p.open = true;
+    if (p.classList && p.classList.contains('content-block') && p.classList.contains('capped')) p.classList.add('open');
+    if (p.style && p.style.display === 'none') p.style.display = '';
+    p = p.parentElement;
+  }
+}
 
-jsonSearchInput.addEventListener('input', () => doJsonSearch());
-jsonSearchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); jsonSearchNav(e.shiftKey ? -1 : 1); }
-  if (e.key === 'Escape') { jsonSearchInput.value = ''; doJsonSearch(); jsonSearchInput.blur(); }
-});
-
-function doJsonSearch() {
-  // Remove old highlights
-  document.querySelectorAll('#ctx-detail .json-hl').forEach(el => {
-    el.replaceWith(el.textContent);
+// Wrap EVERY case-insensitive occurrence of `q` inside `root`'s text nodes in a
+// <span class=cls>, returned in document order. Skips text already inside a hit
+// span so re-runs don't nest. This is what makes search mark the actual matched
+// text (not just ring the whole card) in both the trajectory and the panel.
+function highlightTextIn(root, q, cls) {
+  if (!root || !q) return [];
+  const qLower = q.toLowerCase();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.textContent || !node.textContent.toLowerCase().includes(qLower)) return NodeFilter.FILTER_REJECT;
+      if (node.parentElement && node.parentElement.closest('.cage-hl, .json-hl')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
   });
-  jsonSearchMatches = [];
-  jsonSearchIdx = -1;
-
-  const q = jsonSearchInput.value.trim();
-  if (!q) { jsonSearchCountEl.textContent = ''; return; }
-
-  // Walk text nodes and wrap matches
-  const detail = document.getElementById('ctx-detail');
-  const walker = document.createTreeWalker(detail, NodeFilter.SHOW_TEXT);
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
-
-  const qLower = q.toLowerCase();
+  const spans = [];
   for (const node of nodes) {
     const text = node.textContent;
-    const idx = text.toLowerCase().indexOf(qLower);
-    if (idx === -1) continue;
-    // Split text node and wrap match
-    const before = text.substring(0, idx);
-    const match = text.substring(idx, idx + q.length);
-    const after = text.substring(idx + q.length);
-    const span = document.createElement('span');
-    span.className = 'json-hl bg-yellow-500/30 text-yellow-200 rounded-sm';
-    span.textContent = match;
-    const parent = node.parentNode;
-    if (before) parent.insertBefore(document.createTextNode(before), node);
-    parent.insertBefore(span, node);
-    if (after) parent.insertBefore(document.createTextNode(after), node);
-    parent.removeChild(node);
-    jsonSearchMatches.push(span);
+    const lower = text.toLowerCase();
+    const frag = document.createDocumentFragment();
+    let i = 0, idx;
+    while ((idx = lower.indexOf(qLower, i)) !== -1) {
+      if (idx > i) frag.appendChild(document.createTextNode(text.slice(i, idx)));
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = text.slice(idx, idx + q.length);
+      frag.appendChild(span);
+      spans.push(span);
+      i = idx + q.length;
+    }
+    if (i < text.length) frag.appendChild(document.createTextNode(text.slice(i)));
+    node.parentNode.replaceChild(frag, node);
   }
-
-  jsonSearchCountEl.textContent = jsonSearchMatches.length ? `${jsonSearchMatches.length} found` : 'no match';
-  if (jsonSearchMatches.length > 0) { jsonSearchIdx = 0; scrollToJsonMatch(0); }
+  return spans;
 }
 
-function jsonSearchNav(dir) {
-  if (!jsonSearchMatches.length) return;
-  // Remove current highlight
-  if (jsonSearchIdx >= 0 && jsonSearchMatches[jsonSearchIdx]) {
-    jsonSearchMatches[jsonSearchIdx].classList.remove('ring-2', 'ring-yellow-400');
-  }
-  jsonSearchIdx = (jsonSearchIdx + dir + jsonSearchMatches.length) % jsonSearchMatches.length;
-  scrollToJsonMatch(jsonSearchIdx);
-}
-
-function scrollToJsonMatch(idx) {
-  const el = jsonSearchMatches[idx];
-  if (!el) return;
-  el.classList.add('ring-2', 'ring-yellow-400');
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  jsonSearchCountEl.textContent = `${idx + 1}/${jsonSearchMatches.length}`;
-}
+// NOTE: the detail panel used to have its own custom search box. It was removed
+// in favour of the browser's native find (Ctrl/⌘-F) — simpler and it does not
+// get out of sync with the rendered content. The shared highlightTextIn /
+// revealAncestors helpers above stay: the trajectory search still uses them.
 
 // ========== UTILITIES ==========
 const _escDiv = document.createElement('div');
@@ -1778,6 +2174,38 @@ function esc(text) {
   if (!text) return '';
   _escDiv.textContent = text;
   return _escDiv.innerHTML;
+}
+
+// esc + highlight any director-injected <system-reminder> (the "internal triage context"
+// block) IN PLACE inside an observation, so it's marked in yellow exactly where the agent
+// saw it — no separate banner that would show the same hint a second time on the next step.
+// set by escHL: true when the just-escaped text introduced a NEW director hint (first
+// occurrence). Callers read it right after to decide whether to auto-expand the result.
+let _escHLnew = false;
+function escHL(text) {
+  _escHLnew = false;
+  let h = esc(text);
+  h = h.replace(
+    /&lt;system-reminder&gt;[\s\S]*?internal triage context[\s\S]*?&lt;\/system-reminder&gt;/g,
+    m => {
+      // signature = the actual nudge (text after the fixed _DIR_WRAP boilerplate). The same
+      // hint is re-injected every turn; only highlight the FIRST observation it appears in.
+      const cut = m.indexOf('in your own voice.');
+      const sig = (cut >= 0 ? m.slice(cut + 18) : m).replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (_hlSeen.has(sig)) {
+        // a repeat of an already-marked hint — show it muted/small so the observation stays
+        // truthful but it doesn't scream for attention a second time.
+        return '<span title="(same director hint, repeated in context)" '
+             + 'style="opacity:.45;font-size:11px;">' + m + '</span>';
+      }
+      _hlSeen.add(sig);
+      _escHLnew = true;
+      return '<span title="director-injected hint (NEW here) — scrubbed from training data" '
+           + 'style="background:rgba(245,158,11,.20);border-left:3px solid #f59e0b;'
+           + 'display:inline-block;padding:2px 6px;border-radius:4px;color:#fcd34d;">💉 ' + m + '</span>';
+    }
+  );
+  return h;
 }
 
 function fmtTok(n) {
@@ -1820,25 +2248,109 @@ function updateStatus() {
     ].filter(Boolean);
     summary.textContent = `Steps ${allSteps.length}/${totalLabel} loaded · ${summaryBits.join(' · ')}`;
   }
+  renderToolDistribution();
   if (totalTokens.out && allSteps.length && renderedCount) {
     const last = allSteps[Math.min(renderedCount - 1, allSteps.length - 1)];
     if (last) document.getElementById('token-bar-fill').style.width = `${Math.min((last.cumulative.out / totalTokens.out) * 100, 100)}%`;
   }
 }
 
+// ========== TOOL DISTRIBUTION ==========
+// Palette cycled by tool rank so the bars stay visually distinct without
+// hardcoding agent-specific tool names (Layer 1 knows no benchmark/agent).
+const TOOL_BAR_COLORS = ['#38bdf8', '#34d399', '#a78bfa', '#fbbf24', '#f472b6', '#22d3ee', '#fb923c', '#a3e635'];
+function renderToolDistribution() {
+  const root = document.getElementById('tool-distribution');
+  if (!root) return;
+  const tools = (trajectorySummary && trajectorySummary.tools) || [];
+  const bars = document.getElementById('tool-distribution-bars');
+  const totalEl = document.getElementById('tool-distribution-total');
+  if (!tools.length) { root.classList.add('hidden'); return; }
+  root.classList.remove('hidden');
+  const total = Number(trajectorySummary.tool_calls || tools.reduce((s, t) => s + (t.count || 0), 0));
+  const max = tools.reduce((m, t) => Math.max(m, t.count || 0), 0) || 1;
+  if (totalEl) totalEl.textContent = `· ${total} calls across ${tools.length} tools`;
+  bars.innerHTML = tools.map((t, i) => {
+    const pct = Math.max(2, ((t.count || 0) / max) * 100);
+    const share = total ? ((t.count || 0) * 100 / total).toFixed(1) : '0.0';
+    const color = TOOL_BAR_COLORS[i % TOOL_BAR_COLORS.length];
+    const name = String(t.name || 'unknown').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+    return `<div class="flex items-center gap-3">
+      <div class="w-40 shrink-0 truncate font-mono text-xs text-slate-300" title="${name}">${name}</div>
+      <div class="relative h-5 flex-1 rounded bg-slate-800/60 overflow-hidden">
+        <div class="h-full rounded" style="width:${pct}%;background:${color};opacity:.85"></div>
+      </div>
+      <div class="w-28 shrink-0 text-right text-xs text-slate-400 tabular-nums">${t.count} <span class="text-slate-600">·</span> ${share}%</div>
+    </div>`;
+  }).join('');
+}
+
 // ========== NAVIGATION ==========
+// Single routing path for every "go to step N" affordance: the bottom "Step:"
+// input AND every #step-N anchor in the trajectory (subagent spawn/return/exit
+// banners, compaction links). Anchors on their own only scroll when the target
+// id is already in the DOM; under lazy rendering most steps aren't yet, so those
+// links used to silently no-op. Routing them all through jumpToStep loads +
+// renders the target first, then scrolls — and stamps the URL hash so the
+// location stays deep-linkable (the bottom jump used to leave no #step-N behind).
 async function jumpToStep(n) {
   n = parseInt(n);
   if (isNaN(n) || n < 0) return;
   await ensureLoadedThrough(n);
   while (renderedCount <= n && renderedCount < allSteps.length) renderNextBatch();
   const el = document.getElementById(`step-${n}`);
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    el.style.outline = '2px solid #3b82f6';
-    el.style.outlineOffset = '2px';
-    setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2000);
-  }
+  if (!el) return;
+  // Keep the URL in sync. replaceState does NOT fire hashchange, so this does not
+  // re-enter the router below — no recursion, no history spam per jump.
+  if (location.hash !== `#step-${n}`) history.replaceState(null, '', `#step-${n}`);
+  flashStep(el);
+  holdStepAtTop(el);
+}
+
+function flashStep(el) {
+  el.style.outline = '2px solid #3b82f6';
+  el.style.outlineOffset = '2px';
+  clearTimeout(el._flashTimer);
+  el._flashTimer = setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2000);
+}
+
+// scrollIntoView computes its destination from the CURRENT layout. The Tailwind
+// Play CDN generates utility styles asynchronously (and re-runs on freshly
+// injected steps via a MutationObserver), so right after a big render — and on
+// the initial deep-link — the target's document position keeps drifting for
+// ~1.5s and a single scroll lands off. Re-assert until the layout settles (the
+// element's absolute Y stops moving — which also covers the last steps, whose
+// scroll is clamped by the page bottom and never reaches top=0), time-bounded,
+// bailing the instant the user scrolls so we never fight them. A fresh jump bumps
+// the token so any in-flight loop from a previous jump stops chasing its target.
+let _holdToken = 0;
+function holdStepAtTop(el) {
+  const token = ++_holdToken;
+  let lastY = null, stable = 0, aborted = false;
+  const start = performance.now();
+  const stop = () => { aborted = true; cleanup(); };
+  const cleanup = () => ['wheel', 'touchmove'].forEach(ev => window.removeEventListener(ev, stop));
+  ['wheel', 'touchmove'].forEach(ev => window.addEventListener(ev, stop, { passive: true }));
+  (function tick() {
+    if (aborted || token !== _holdToken) { cleanup(); return; }
+    el.scrollIntoView({ block: 'start' });
+    const y = Math.round(el.getBoundingClientRect().top + window.scrollY);  // absolute doc Y
+    stable = (y === lastY) ? stable + 1 : 0;
+    lastY = y;
+    if (stable >= 3 || performance.now() - start > 2500) { cleanup(); return; }
+    setTimeout(tick, 80);
+  })();
+}
+
+// Deep-link / anchor router: clicking a #step-N link, loading a URL that ends in
+// #step-N, or using back/forward all drive the same jumpToStep path.
+function stepFromHash() {
+  const m = /^#step-(\d+)$/.exec(location.hash || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+function handleHashNav() {
+  const n = stepFromHash();
+  if (n != null) jumpToStep(n);
 }
 
 function scrollToTop() { window.scrollTo({ top: 0, behavior: 'smooth' }); }
@@ -1852,6 +2364,7 @@ const searchInput = document.getElementById('search-input');
 const searchCountEl = document.getElementById('search-count');
 const searchNavEl = document.getElementById('search-nav');
 let searchTimeout = null;
+let searchQuery = '';   // original-case query, for in-card text highlighting
 
 searchInput.addEventListener('input', () => { clearTimeout(searchTimeout); searchTimeout = setTimeout(doSearch, 300); });
 searchInput.addEventListener('keydown', (e) => {
@@ -1862,15 +2375,20 @@ searchInput.addEventListener('keydown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && activeStepIndex >= 0) { closePanel(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    // Panel open → let the browser's native find run (that's the panel's search
+    // now). Panel closed → jump into the trajectory search box.
+    if (activeStepIndex >= 0) return;
     e.preventDefault();
-    if (activeStepIndex >= 0) { jsonSearchInput.focus(); jsonSearchInput.select(); }
-    else { searchInput.focus(); searchInput.select(); }
+    searchInput.focus(); searchInput.select();
   }
 });
 
 async function doSearch() {
-  const q = searchInput.value.trim().toLowerCase();
+  const raw = searchInput.value.trim();
+  searchQuery = raw;
+  const q = raw.toLowerCase();
   document.querySelectorAll('.search-highlight').forEach(el => el.classList.remove('search-highlight', 'ring-2', 'ring-yellow-500/50'));
+  clearSearchTextHl();
   searchMatches = []; searchIdx = -1;
   if (!q) { searchCountEl.classList.add('hidden'); searchNavEl.classList.add('hidden'); return; }
   searchCountEl.textContent = 'Searching...';
@@ -1882,6 +2400,18 @@ async function doSearch() {
   searchCountEl.classList.remove('hidden');
   searchNavEl.classList.remove('hidden');
   if (searchMatches.length > 0) { searchIdx = 0; scrollToMatch(0); }
+}
+
+// Unwrap in-card text highlights and merge the split text nodes back so a fresh
+// query matches cleanly. Only touches cards that were actually marked.
+function clearSearchTextHl() {
+  const cards = new Set();
+  document.querySelectorAll('#trajectory-container .cage-hl').forEach(el => {
+    const card = el.closest('.step-card, .bg-call-line') || el.parentElement;
+    if (card) cards.add(card);
+    el.replaceWith(document.createTextNode(el.textContent));
+  });
+  cards.forEach(c => { try { c.normalize(); } catch (_) {} c._hlQuery = ''; });
 }
 
 async function loadStepsForSearch(q) {
@@ -1916,7 +2446,15 @@ function scanSearchMatches(q, start, seen) {
 function highlightRenderedSearchMatches() {
   for (const stepIndex of searchMatches) {
     const el = document.getElementById(`step-${stepIndex}`);
-    if (el) el.classList.add('search-highlight', 'ring-2', 'ring-yellow-500/50');
+    if (!el) continue;
+    el.classList.add('search-highlight', 'ring-2', 'ring-yellow-500/50');
+    // Mark the matched substring in place (once per card per query), so you can
+    // see WHAT matched instead of eyeballing a ringed card. Idempotent: a second
+    // pass finds nothing new because prior hits are skipped by highlightTextIn.
+    if (searchQuery && el._hlQuery !== searchQuery) {
+      highlightTextIn(el, searchQuery, 'cage-hl');
+      el._hlQuery = searchQuery;
+    }
   }
 }
 
@@ -1930,17 +2468,31 @@ async function scrollToMatch(idx) {
   const stepIndex = searchMatches[idx];
   await ensureLoadedThrough(stepIndex);
   while (renderedCount <= stepIndex && renderedCount < allSteps.length) renderNextBatch();
-  highlightRenderedSearchMatches();
+  highlightRenderedSearchMatches();   // ring + in-card marks for any just-rendered card
   const el = document.getElementById(`step-${stepIndex}`);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (el) {
+    document.querySelectorAll('#trajectory-container .cage-hl-active').forEach(m => m.classList.remove('cage-hl-active'));
+    // Land on the actual matched text (revealing any folded thinking/result
+    // block it sits in), not the top of the card.
+    const hit = el.querySelector('.cage-hl');
+    if (hit) {
+      revealAncestors(hit);
+      hit.classList.add('cage-hl-active');
+      hit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
   searchCountEl.textContent = `${idx + 1} / ${searchMatches.length}`;
 }
 
 function clearSearch() {
   searchInput.value = '';
+  searchQuery = '';
   searchMatches = []; searchIdx = -1;
   searchCountEl.classList.add('hidden'); searchNavEl.classList.add('hidden');
   document.querySelectorAll('.search-highlight').forEach(el => el.classList.remove('search-highlight', 'ring-2', 'ring-yellow-500/50'));
+  clearSearchTextHl();
 }
 </script>
 {% endif %}

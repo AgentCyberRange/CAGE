@@ -11,6 +11,11 @@ class AgentContainerResources:
 
     volumes: dict[str, str] = field(default_factory=dict)
     group_add: list[str] = field(default_factory=list)
+    # Launch the trial container with ``--privileged``. Needed by agents that
+    # run their own Docker daemon inside the container (e.g. a Docker-in-Docker
+    # orchestrator that spawns worker containers). Off by default — only agents
+    # that genuinely need it opt in via this flag.
+    privileged: bool = False
 
 
 @dataclass

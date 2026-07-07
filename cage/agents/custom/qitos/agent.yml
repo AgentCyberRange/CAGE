@@ -1,0 +1,42 @@
+# QitOS CyberGym agent as a Cage custom agent (manifest-driven — zero framework code).
+#
+# QitOS is the external PoC-generation harness (the `qitos` framework + the
+# `cybergym_agent` agent on top). Its source is the two pinned submodules
+# third_party/qitos + third_party/cybergym_agent (this manifest + entrypoint are
+# our in-tree glue). The harness runs its own agent loop and makes
+# OpenAI-compatible LLM calls, so Cage records every call by pointing its
+# OPENAI_BASE_URL at the in-container proxy.
+#
+# The orchestration is qitos_cage_entry.py (copied into the container by Cage,
+# not baked, so you edit it with no rebuild); the harness itself is vendored
+# UNCHANGED in the image (docker/qitos.Dockerfile).
+name: qitos
+
+# Image bakes the vendored harness (qitos + cybergym_agent) + deps + the proxy.
+image: cage/qitos:latest
+
+# ONE build path for every agent: `cage agent build --agent qitos` runs this
+# (checks the submodules are checked out, then a single docker build).
+build:
+  script: docker/build_qitos.sh
+
+# Runs its tools directly in this trial container (HostEnv, no nested Docker), so
+# no privileged / DinD is needed.
+workdir: .
+output: stdout
+
+# {task_instruction} is unused (the harness self-prompts from the staged workspace
+# files); the reserved {base_url}/{api_key}/{model_name}/{max_rounds} are filled by
+# Cage. {base_url} is the in-container proxy (…/v1 for the openai protocol). The
+# entry reads the grading-service URL out of the staged submit.sh itself.
+command: >-
+  /usr/bin/python3 qitos_cage_entry.py
+  --base-url "{base_url}"
+  --api-key "{api_key}"
+  --model "{model_name}"
+  --max-steps {max_rounds}
+
+env:
+  # Upstream's blind contract: the agent only gets vul-side feedback from
+  # submit.sh; the authoritative vul+fix verdict is Cage's scorer.
+  CYBERGYM_VUL_ONLY_FEEDBACK: "1"

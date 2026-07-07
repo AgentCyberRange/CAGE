@@ -852,7 +852,17 @@ def _result_row(info: dict[str, Any], trial_dir: Path) -> dict[str, Any]:
             score = "-"
     duration_ms = int_or_zero(info.get("duration_ms"))
     progress = info.get("progress") or {}
-    steps = int_or_zero(progress.get("total_requests") or progress.get("success"))
+    # "steps" = budgeted agent rounds, the same quantity max_rounds caps and the
+    # web inspector shows. Use ``successful_requests`` — the proxy's canonical
+    # round counter (success − compact, already net of compaction). Do NOT use
+    # total_requests: it also counts failed upstream attempts (e.g. HTTP 529
+    # retries), which inflate the column past max_rounds and disagree with the
+    # front-end. Mirror web/data's fallback chain exactly: successful_requests →
+    # success → total_requests.
+    steps = progress.get("successful_requests")
+    if steps is None:
+        steps = progress.get("success", progress.get("total_requests"))
+    steps = int_or_zero(steps)
     usage = info.get("usage") or {}
     try:
         cost = float(usage.get("cost_usd") or 0.0)

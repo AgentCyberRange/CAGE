@@ -49,6 +49,64 @@ def _translate_tools_anthropic_to_openai(tools: list[dict[str, Any]]) -> list[di
     return openai_tools
 
 
+def _translate_tool_choice(tool_choice: Any) -> Any:
+    """Map an Anthropic ``tool_choice`` to the OpenAI form.
+
+    ``auto`` → ``"auto"``, ``any`` → ``"required"``, ``none`` → ``"none"``,
+    ``{"type":"tool","name":X}`` → ``{"type":"function","function":{"name":X}}``.
+    Returns ``None`` when there's nothing to send (so the key is omitted).
+    """
+    if not isinstance(tool_choice, dict):
+        return None
+    ctype = tool_choice.get("type")
+    if ctype == "auto":
+        return "auto"
+    if ctype == "any":
+        return "required"
+    if ctype == "none":
+        return "none"
+    if ctype == "tool" and tool_choice.get("name"):
+        return {"type": "function", "function": {"name": tool_choice["name"]}}
+    return None
+
+
+def _block_to_text_fallback(block: dict[str, Any]) -> str:
+    """Text stand-in for an Anthropic content block with no OpenAI-text form
+    (image / document / unknown). Inline-text sources are unwrapped verbatim;
+    binary sources become a visible ``[... omitted]`` marker so the block is
+    never *silently* dropped in translation.
+    """
+    btype = block.get("type") or "content"
+    source = block.get("source") if isinstance(block.get("source"), dict) else {}
+    if source.get("type") == "text" and isinstance(source.get("data"), str):
+        return source["data"]
+    media = source.get("media_type") or block.get("media_type") or ""
+    data = source.get("data")
+    size = f", ~{(len(data) * 3) // 4} bytes" if isinstance(data, str) and data else ""
+    label = media or btype
+    return f"[{btype} omitted in OpenAI translation: {label}{size}]"
+
+
+def _stringify_tool_result_content(tr_content: Any) -> str:
+    """Flatten an Anthropic ``tool_result.content`` (str or block list) to the
+    string an OpenAI ``tool`` message carries. Non-text blocks (e.g. an image
+    returned by Read) get a marker instead of vanishing.
+    """
+    if isinstance(tr_content, str):
+        return tr_content
+    if isinstance(tr_content, list):
+        parts: list[str] = []
+        for b in tr_content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text":
+                parts.append(str(b.get("text") or ""))
+            else:
+                parts.append(_block_to_text_fallback(b))
+        return "\n".join(parts)
+    return str(tr_content or "")
+
+
 def _translate_messages_anthropic_to_openai(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -79,6 +137,15 @@ def _translate_messages_anthropic_to_openai(
                 tool_uses.append(block)
             elif block_type == "tool_result":
                 tool_results.append(block)
+            elif block_type in ("thinking", "redacted_thinking"):
+                # Ephemeral reasoning — not replayed to OpenAI upstreams.
+                continue
+            else:
+                # image / document / unknown: keep a visible marker so the
+                # block is never silently dropped in translation.
+                fallback = _block_to_text_fallback(block)
+                if fallback:
+                    text_parts.append(fallback)
 
         if role == "assistant" and tool_uses:
             text = "\n".join(text_parts) if text_parts else None
@@ -101,20 +168,17 @@ def _translate_messages_anthropic_to_openai(
             continue
 
         if tool_results:
-            if text_parts:
-                openai_messages.append({"role": "user", "content": "\n".join(text_parts)})
+            # OpenAI requires ``tool`` messages to directly follow the
+            # assistant ``tool_calls`` turn; any accompanying text/marker goes
+            # *after* them as a user message, never wedged in between.
             for tr in tool_results:
-                tr_content = tr.get("content", "")
-                if isinstance(tr_content, list):
-                    tr_content = "\n".join(
-                        str(b.get("text", "")) for b in tr_content
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    )
                 openai_messages.append({
                     "role": "tool",
                     "tool_call_id": tr.get("tool_use_id", ""),
-                    "content": str(tr_content or ""),
+                    "content": _stringify_tool_result_content(tr.get("content", "")),
                 })
+            if text_parts:
+                openai_messages.append({"role": "user", "content": "\n".join(text_parts)})
             continue
 
         openai_messages.append({"role": role, "content": "\n".join(text_parts)})
@@ -249,6 +313,18 @@ def _translate_response_openai_to_anthropic(
     if raw_text and not native_tool_calls:
         raw_text, text_tool_blocks = _extract_text_tool_calls(raw_text, request_id)
 
+    # Some vLLM/thinking deployments emit <tool_call> XML inside
+    # reasoning_content/reasoning with an empty content field. Recover it so
+    # the tool call isn't lost on the translation path.
+    if not native_tool_calls and not text_tool_blocks:
+        for field in ("reasoning_content", "reasoning"):
+            rc = message.get(field)
+            if isinstance(rc, str) and "<tool_call>" in rc.lower():
+                _, blocks = _extract_text_tool_calls(rc, request_id)
+                if blocks:
+                    text_tool_blocks = blocks
+                    break
+
     if raw_text:
         content_blocks.append({"type": "text", "text": raw_text})
 
@@ -271,8 +347,21 @@ def _translate_response_openai_to_anthropic(
     if not content_blocks:
         content_blocks.append({"type": "text", "text": ""})
 
-    stop_reason_map = {"tool_calls": "tool_use", "length": "max_tokens"}
+    stop_reason_map = {
+        "tool_calls": "tool_use",
+        "function_call": "tool_use",
+        "length": "max_tokens",
+        "content_filter": "end_turn",
+    }
     stop_reason = "tool_use" if text_tool_blocks else stop_reason_map.get(finish_reason, "end_turn")
+
+    usage_out: dict[str, Any] = {
+        "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+        "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+    }
+    prompt_details = usage.get("prompt_tokens_details")
+    if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens"):
+        usage_out["cache_read_input_tokens"] = int(prompt_details["cached_tokens"])
 
     return {
         "id": request_id,
@@ -281,10 +370,7 @@ def _translate_response_openai_to_anthropic(
         "model": model,
         "content": content_blocks,
         "stop_reason": stop_reason,
-        "usage": {
-            "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
-            "output_tokens": int(usage.get("completion_tokens", 0) or 0),
-        },
+        "usage": usage_out,
     }
 
 
@@ -356,10 +442,17 @@ def _build_openai_request(
     anthropic_tools = anthropic_request.get("tools")
     if anthropic_tools:
         payload["tools"] = _translate_tools_anthropic_to_openai(anthropic_tools)
+        tool_choice = _translate_tool_choice(anthropic_request.get("tool_choice"))
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
     for key in ("max_tokens", "temperature", "top_p", "top_k"):
         if key in anthropic_request and anthropic_request[key] is not None:
             payload[key] = anthropic_request[key]
+
+    stop_sequences = anthropic_request.get("stop_sequences")
+    if stop_sequences:
+        payload["stop"] = stop_sequences
 
     if upstream_extra_body:
         # Registry-pinned inference config (e.g. Qwen ``chat_template_kwargs``

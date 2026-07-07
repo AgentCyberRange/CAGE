@@ -90,6 +90,47 @@ def override_selected_agent_field(
     candidates[0][field] = value
 
 
+def merge_selected_agent_params(
+    raw: dict[str, Any],
+    *,
+    agent_ids: Iterable[str],
+    params: dict[str, Any],
+    flag: str = "--param",
+) -> None:
+    """Merge custom-agent ``params`` into exactly one selected agent.
+
+    Creates the agent's ``params`` mapping if absent; CLI values override any
+    same-named manifest / yaml defaults (the manifest applies its own defaults
+    underneath at load time).
+    """
+    if not params:
+        return
+    requested = [str(agent_id) for agent_id in agent_ids if str(agent_id)]
+    agents = raw.get("agents", []) or []
+    if not isinstance(agents, list):
+        raise ValueError(f"agents must be a list before {flag} can be applied")
+
+    candidates: list[dict[str, Any]] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        if requested:
+            if str(agent.get("id") or "") in requested:
+                candidates.append(agent)
+        else:
+            candidates.append(agent)
+
+    if len(candidates) != 1:
+        hint = f"select exactly one agent with --agent before using {flag}"
+        if requested:
+            hint = f"--agent matched {len(candidates)} agent(s); expected exactly one"
+        raise ValueError(f"Cannot apply {flag}: {hint}")
+    existing = candidates[0].get("params")
+    merged: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(params)
+    candidates[0]["params"] = merged
+
+
 def override_selected_agent_model(
     raw: dict[str, Any],
     *,
@@ -176,6 +217,14 @@ def _normalize_project_relative_paths(
         ("eval", "benchmark", "benchmark_root"),
     ):
         _normalize_path_at(normalized, path, base_dir=base_dir)
+    # Custom-agent `source:` is resolved relative to the project file, so it must
+    # survive the move to a temp effective-project location too (agents is a list,
+    # not a dotted scalar path, so normalize each entry here).
+    agents = normalized.get("agents")
+    if isinstance(agents, list):
+        for agent in agents:
+            if isinstance(agent, dict) and agent.get("source"):
+                agent["source"] = _absolutize_path(agent["source"], base_dir=base_dir)
     return normalized
 
 

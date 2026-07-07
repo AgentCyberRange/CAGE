@@ -832,20 +832,75 @@ class ExperimentArtifactWriter:
                 return trial_ref.record_ref
         raise KeyError(f"unknown trial_id: {trial_id}")
 
+    def refresh_spec(self, spec: ExperimentSpec) -> None:
+        """Rewrite only ``experiment_spec.json`` (the config projection) in place.
+
+        On ``--resume`` the canonical record + per-trial evidence are
+        deliberately preserved (they are the prior-attempt evidence resume
+        classifies against), which skips the full initial-snapshot rewrite — so
+        ``experiment_spec.json`` keeps whatever config the *original* invocation
+        wrote and can drift from the config that actually executes (resolved
+        fresh from the current YAML each run). The spec file is a pure
+        projection — nothing reads it to drive execution — so refreshing it to
+        the current resolved spec keeps the recorded config honest without
+        touching any preserved evidence.
+        """
+        spec_path = self.run_dir / "experiment_spec.json"
+        _atomic_write_text(spec_path, experiment_spec_to_json(spec))
+        self._refresh_artifact_index_entry(spec_path)
+
     def _refresh_run_trial_counts(self) -> ExperimentRecord:
         """Recount terminal trial records and persist the run-level summary."""
 
         record = self._load_record()
         completed = failed = interrupted = 0
+        # Per-subject tallies so SubjectRunRecord.status can transition out of
+        # its default "planned" (it never had a writer before, so it stayed
+        # "planned" for the life of every run — a stale field if anything reads
+        # run/subject status from the canonical record).
+        per_subject: dict[str, dict[str, int]] = {}
         for trial_ref in record.trials.records:
             trial = self._load_trial_record(trial_ref.record_ref)
             status = trial.status.strip().lower()
+            bucket = per_subject.setdefault(
+                trial.subject_id, {"terminal": 0, "active": 0, "planned": 0}
+            )
             if status in COMPLETED_TRIAL_STATUSES:
                 completed += 1
+                bucket["terminal"] += 1
             elif status in FAILED_TRIAL_STATUSES:
                 failed += 1
+                bucket["terminal"] += 1
             elif status in INTERRUPTED_TRIAL_STATUSES:
                 interrupted += 1
+                bucket["terminal"] += 1
+            elif status == "running":
+                bucket["active"] += 1
+            else:
+                bucket["planned"] += 1
+
+        def _subject_status(b: dict[str, int]) -> str:
+            total = b["terminal"] + b["active"] + b["planned"]
+            if total == 0:
+                return "planned"
+            if b["terminal"] == total:
+                return "completed"
+            if b["terminal"] or b["active"]:
+                return "running"
+            return "planned"
+
+        subjects = tuple(
+            replace(
+                subject,
+                status=_subject_status(
+                    per_subject.get(
+                        subject.subject_id,
+                        {"terminal": 0, "active": 0, "planned": 0},
+                    )
+                ),
+            )
+            for subject in record.subjects
+        )
         updated = replace(
             record,
             trials=replace(
@@ -854,6 +909,7 @@ class ExperimentArtifactWriter:
                 failed=failed,
                 interrupted=interrupted,
             ),
+            subjects=subjects,
         )
         self._write_experiment_record(updated)
         return updated

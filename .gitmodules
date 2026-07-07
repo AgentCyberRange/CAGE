@@ -18,3 +18,14 @@
 	path = examples/agent_pentest_bench/datasets/web_exploit_bench
 	url = https://github.com/AgentCyberRange/WebExploitBench.git
 	branch = main
+[submodule "third_party/Cairn"]
+	path = third_party/Cairn
+	url = https://github.com/oritera/Cairn.git
+[submodule "third_party/qitos"]
+	path = third_party/qitos
+	url = https://github.com/WhitzardAgent/qitos.git
+	branch = qitos_cybergym
+[submodule "third_party/cybergym_agent"]
+	path = third_party/cybergym_agent
+	url = https://github.com/bmz-q-q/cybergym_agent.git
+	branch = para_action

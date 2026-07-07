@@ -12,6 +12,7 @@ import re
 import threading
 import time
 from collections import Counter, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -63,7 +64,9 @@ from cage.web.cache import (
     discovery_signature,
     get_or_compute,
     is_recently_active,
+    run_history_cache,
     run_summary_cache,
+    run_tools_cache,
     safe_mtime_ns,
     scan_run_signals,
     trial_summary_cache,
@@ -220,6 +223,25 @@ def scan_runs(root: Path) -> list[RunInfo]:
     return _sort_runs(runs)
 
 
+def warm_run_history_cache(run_dir: Path) -> None:
+    """Prime the run-history reconstruction cache for one run, off the request path.
+
+    ``load_run_history`` reconstructs from a full per-trial ``meta.json`` walk
+    when a run never persisted ``run_history.json`` (live/crashed/abandoned) —
+    multi-second on a large run over NAS. The result is cached on the cheap
+    structural run signature, so paying it here (background warmer) means the
+    first detail-page open is already warm. Best-effort: never raises.
+
+    Deliberately does *not* warm per-trial summaries: that cache is a bounded
+    4096-entry LRU sized for interactive browsing, and bulk-priming every run's
+    trials would thrash it and slow the pages it is meant to speed up.
+    """
+    try:
+        load_run_history(run_dir)
+    except Exception:
+        pass
+
+
 def scan_runs_for_project(root: Path, project: str) -> list[RunInfo]:
     """Find runs for a single benchmark (project) only — the per-benchmark page.
 
@@ -326,6 +348,23 @@ _EMPTY_RUN_SIGNALS = RunFsSignals(
 )
 
 
+def _run_recently_active(run_dir: Path, *artifact_mtimes_ns: int) -> bool:
+    """Cheap 'is this run plausibly still live?' from run-level mtimes only.
+
+    A live run keeps touching its run-level artifacts (the canonical record,
+    dashboard, run-history, planned-trials) as trials complete, and adding a
+    trial dir bumps ``run_dir``'s own mtime. If none of those moved within the
+    live window the run is settled, and the expensive ``scan_run_signals`` walk
+    over ``trials/`` — its only effect on a settled run being empty signals — can
+    be skipped. Pure stat()s already taken by the caller, plus one for run_dir.
+    """
+    newest = safe_mtime_ns(run_dir)
+    for mtime in artifact_mtimes_ns:
+        if mtime > newest:
+            newest = mtime
+    return is_recently_active(newest)
+
+
 def _shallow_run_signature(run_dir: Path) -> tuple[int, ...]:
     """Cheap structural fingerprint of a run's trial layout.
 
@@ -421,6 +460,25 @@ def _load_run_info(
         # take minutes. Empty signals yield an identical RunInfo here because a
         # completed run has ``active_count == 0`` (see the ``completed_at`` branch
         # in _build_run_info's running logic).
+        signals = _EMPTY_RUN_SIGNALS
+    elif record_mtime >= 0:
+        # Canonical record present: run-level trial counters come from it, and a
+        # cheap record-mtime-based "running" signal is derived in _build_run_info
+        # (the ``record_present and record_pending and is_recently_active``
+        # branch). So the trials/ deep walk — thousands of scandir/stat syscalls,
+        # ~9s on NAS for a 2600-trial run — is never needed on the list/index
+        # path: a benchmark with dozens of such runs was re-walking every one on
+        # every page load. The live *detail* page (polled) still shows precise
+        # per-trial state; the list only needs counts + a running badge.
+        signals = _EMPTY_RUN_SIGNALS
+    elif not _run_recently_active(
+        run_dir, dashboard_mtime, record_mtime, history_mtime, planned_mtime
+    ):
+        # No canonical record and no ``completed_at``, and nothing at the run
+        # level moved within the live window — a crashed/abandoned legacy run.
+        # Its trials/ tree is frozen, so the walk would only return empty
+        # signals; skip it. A recently-active legacy run (no record to count
+        # from) still falls through to the walk below.
         signals = _EMPTY_RUN_SIGNALS
     else:
         signals = scan_run_signals(run_dir)
@@ -708,12 +766,27 @@ def _load_canonical_record_payloads(
 
     if not record_present:
         return {}, {}
-    snapshot = _cached_run_snapshot(run_dir)
-    if snapshot is not None:
+    # Read ONLY the run-level record + spec (one small file each), never a full
+    # snapshot. ``load_snapshot`` pulls the artifact_index + EVERY trial record +
+    # all events — thousands of files / tens of seconds on NAS for a large run
+    # (a 2600-trial run measured at ~45s) — but the run-list summary needs only
+    # the record's top-level status, trial counters, and score_summary, which
+    # ``load_record`` returns directly. This is the same cheap read the
+    # detail-page stub uses; the run-list path must not be heavier than it.
+    try:
+        reader = ExperimentArtifactReader(run_dir)
+        record_obj = reader.load_record()
+        spec_obj = reader.load_spec()
+    except Exception:
+        record_obj = None
+        spec_obj = None
+    if record_obj is not None:
         return (
-            experiment_record_to_mapping(snapshot.record),
-            experiment_spec_to_mapping(snapshot.spec),
+            experiment_record_to_mapping(record_obj),
+            experiment_spec_to_mapping(spec_obj) if spec_obj is not None else {},
         )
+    # Fallback: raw JSON for bad/incomplete/historical canonical artifacts, so a
+    # damaged record renders the legacy dashboard/planned view instead of 500ing.
     record = _load_json(run_dir / EXPERIMENT_RECORD_FILENAME)
     if not isinstance(record, dict):
         return {}, {}
@@ -1033,6 +1106,19 @@ def _timestamp_ms(value: Any) -> int:
         return 0
 
 
+def _derive_duration_ms(started_at: Any, completed_at: Any) -> int:
+    """Wall-clock trial duration in ms from its start/finish timestamps.
+
+    The canonical ``TrialRecord`` stores only ``started_at``/``completed_at`` (no
+    duration field), so the row template's ``duration_ms`` must be derived here —
+    otherwise every finished trial renders ``-`` for duration. Returns 0 when
+    either timestamp is missing/unparseable or the span is negative.
+    """
+    start = _timestamp_ms(started_at)
+    end = _timestamp_ms(completed_at)
+    return end - start if (start and end and end >= start) else 0
+
+
 def _run_duration_ms(data: dict[str, Any], run_dir: Path, last_active_ts_ms: int = 0) -> int:
     explicit = int_or_zero(data.get("duration_ms"))
     if explicit:
@@ -1074,7 +1160,18 @@ def load_run_history(
         return recorded
 
     if reconstruct:
-        reconstructed = _reconstruct_run_history_from_trial_attempts(run_dir)
+        # Reconstruction reads every trial's (and every resume archive's)
+        # meta.json off disk — thousands of NAS reads for a large run, repeated
+        # on every page load. Cache on the cheap structural run signature: a
+        # settled run hits cache forever; a live run only recomputes when a
+        # trial dir is added or a resume happens (not on in-trial ticks, which
+        # don't move history windows meaningfully).
+        reconstructed = get_or_compute(
+            run_history_cache,
+            run_dir,
+            _shallow_run_signature(run_dir),
+            lambda: _reconstruct_run_history_from_trial_attempts(run_dir),
+        )
         if reconstructed:
             return reconstructed
 
@@ -1194,15 +1291,35 @@ def _iter_trial_meta_paths(trials_root: Path):
                 yield nested
 
 
+# Bounded thread pool for the per-attempt meta.json walk during history
+# reconstruction. Latency-bound NAS reads, so 16 is plenty; overridable.
+_HISTORY_SCAN_WORKERS = max(
+    4, int(os.environ.get("CAGE_INSPECT_TRIAL_WORKERS", "16") or "16")
+)
+
+
 def _reconstruct_run_history_from_trial_attempts(run_dir: Path) -> list[dict[str, Any]]:
     trials_root = run_dir / TRIALS_DIRNAME
     if not trials_root.is_dir():
         return []
 
+    # Read every attempt's meta.json concurrently — the walk is dominated by
+    # per-file NAS read latency, not parsing, so a small thread pool collapses a
+    # serial scan of hundreds of trials to roughly its slowest single read. The
+    # JSON parse and aggregation below stay sequential (cheap, order-independent).
+    meta_paths = list(_iter_trial_meta_paths(trials_root))
+    if not meta_paths:
+        return []
+    workers = min(_HISTORY_SCAN_WORKERS, len(meta_paths))
+    if workers > 1:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            loaded = pool.map(_load_json, meta_paths)
+    else:
+        loaded = map(_load_json, meta_paths)
+
     attempts_by_trial: dict[str, list[dict[str, Any]]] = {}
-    for meta_path in _iter_trial_meta_paths(trials_root):
+    for meta_path, meta in zip(meta_paths, loaded):
         attempt_dir = meta_path.parent
-        meta = _load_json(meta_path)
         if not isinstance(meta, dict):
             continue
         timing = meta.get("timing") if isinstance(meta.get("timing"), dict) else {}
@@ -1570,6 +1687,91 @@ def _load_canonical_trial_records(run_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
+def ordered_canonical_trial_refs(run_dir: Path) -> list[dict[str, Any]] | None:
+    """Cheap ordered trial list from the *run-level* record alone.
+
+    Returns ``[{"id", "record_ref", "sort_index"}, ...]`` in planned order, or
+    ``None`` if the run is not canonical (no ``experiment_record.json`` with
+    trial refs). One ~100 KB JSON parse — it never reads per-trial record files
+    or the full snapshot, so it is milliseconds even for a 1500-trial run. This
+    is the index the detail page paginates over: order + identity for every
+    trial, with per-trial status/scores deferred to :func:`enrich_canonical_trial_rows`
+    for only the rows actually rendered.
+    """
+    record_path = run_dir / EXPERIMENT_RECORD_FILENAME
+    if not record_path.is_file():
+        return None
+    try:
+        record = ExperimentArtifactReader(run_dir).load_record()
+    except Exception:
+        return None
+    refs: list[dict[str, Any]] = []
+    for index, trial_ref in enumerate(record.trials.records):
+        trial_id = str(trial_ref.trial_id or "").strip()
+        if not trial_id:
+            continue
+        refs.append({
+            "id": trial_id,
+            "record_ref": str(trial_ref.record_ref or ""),
+            "sort_index": index,
+        })
+    return refs
+
+
+def enrich_canonical_trial_rows(
+    run_dir: Path,
+    refs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build full display rows for a *slice* of :func:`ordered_canonical_trial_refs`.
+
+    Reads only the given slice's per-trial record files (concurrently — the walk
+    is NAS-latency-bound), producing rows byte-identical to the full
+    ``_trial_rows_for_run`` canonical path. This is what makes a paginated detail
+    page cheap: render 60 rows by reading 60 records, not 1500.
+    """
+    if not refs:
+        return []
+    reader = ExperimentArtifactReader(run_dir)
+
+    def _row(ref: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            trial_record = reader.load_trial_record(ref["record_ref"])
+        except Exception:
+            return None
+        record_row = _canonical_trial_record_row_from_contract(
+            run_dir=run_dir,
+            trial_record=trial_record,
+            record_ref=ref["record_ref"],
+            trial_index=ref["sort_index"],
+        )
+        info = pending_trial_summary(record_row)
+        trial_dir = planned_trial_dir(run_dir, ref["id"])
+        info["has_artifacts"] = is_trial_dir(trial_dir)
+        # The canonical record carries no model-call counts, so overlay the
+        # per-trial progress/usage projection. Without this the detail page's
+        # first (lazy-rendered) slice shows "-" for steps until a background
+        # scan warms it; reading the ~200B progress.json for the visible rows
+        # makes steps appear the moment the page opens.
+        if info.get("has_artifacts"):
+            activity = load_trial_activity(trial_dir)
+            if activity:
+                info.update(activity)
+        return {
+            "dir": trial_dir,
+            "info": info,
+            "id": ref["id"],
+            "sort_index": ref["sort_index"],
+        }
+
+    if len(refs) == 1:
+        rows = [_row(refs[0])]
+    else:
+        workers = min(_HISTORY_SCAN_WORKERS, len(refs))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            rows = list(pool.map(_row, refs))
+    return [row for row in rows if row is not None]
+
+
 def _canonical_trial_record_row_from_contract(
     *,
     run_dir: Path,
@@ -1786,7 +1988,12 @@ def _canonical_trial_record_summary(record: dict[str, Any]) -> dict[str, Any]:
     exit_code = info.get("exit_code")
     info.update({
         "running": status == "running",
-        "duration_ms": 0,
+        # Canonical records store only start/finish timestamps (no duration
+        # field), so derive the wall-clock duration the row template renders —
+        # otherwise every finished trial shows "-".
+        "duration_ms": _derive_duration_ms(
+            info.get("started_at"), info.get("completed_at")
+        ),
         "scores": info.get("scores") if isinstance(info.get("scores"), dict) else {},
         "usage": {},
         "tags": [],
@@ -2499,6 +2706,29 @@ def trial_summary_from_dashboard_entry(
     info: dict[str, Any] = dict(entry)
     info.setdefault("running", False)
     info["has_artifacts"] = True
+    # Force-killed / resumed trials leave the projection's duration_ms at 0;
+    # derive it from the entry's start/finish timestamps so the duration column
+    # isn't blank for half the run.
+    if not info.get("duration_ms"):
+        info["duration_ms"] = _derive_duration_ms(
+            info.get("started_at"), info.get("completed_at")
+        )
+    # Synthesize the model-call "progress" view the overview template renders
+    # from the projection's usage counts, so a settled run shows steps with NO
+    # per-trial filesystem read. num_requests is the canonical agent-round count
+    # (= successful_requests, what max_rounds caps and we show as "steps").
+    # total_requests/errors are present only on newer projections; when absent
+    # the template hides the error rate rather than showing a bogus 0%.
+    usage = entry.get("usage") if isinstance(entry.get("usage"), dict) else {}
+    if "progress" not in info and usage:
+        rounds = int_or_zero(usage.get("num_requests"))
+        has_totals = usage.get("total_requests") is not None
+        if rounds or has_totals:
+            progress: dict[str, Any] = {"successful_requests": rounds}
+            if has_totals:
+                progress["total_requests"] = int_or_zero(usage.get("total_requests"))
+                progress["errors"] = int_or_zero(usage.get("errors"))
+            info["progress"] = progress
     info["tags"] = _extract_trial_tags(info, {})
     info.update(
         _classify_trial_status(
@@ -2969,6 +3199,19 @@ def _build_trajectory_payload(
         end=offset + limit,
     )
 
+    # Per-request observation (latest fed-back tool result). The result of step
+    # idx's action shows up as the observation in request idx+1 — same as how a
+    # native tool_use's result is matched from the following request.
+    observations = [_latest_observation_text(e) for e in entries]
+
+    # First request index per node (or the root agent when there is no node), so
+    # each agent/node's first step can surface its system + user prompt.
+    node_first_idx: dict[str, int] = {}
+    for _i, _e in enumerate(entries):
+        _span = _e.get("cage_span")
+        _nd = _span.get("node") if isinstance(_span, dict) else None
+        node_first_idx.setdefault(str(_nd) if _nd else "__root__", _i)
+
     steps: list[dict[str, Any]] = []
     for idx, entry in enumerate(entries):
         usage = _extract_usage(entry)
@@ -2999,6 +3242,24 @@ def _build_trajectory_payload(
         for m in req_msgs:
             role = m.get("role", "?")
             context_summary[role] = context_summary.get(role, 0) + 1
+        # Result of THIS step's action = the observation fed back in the next
+        # request (None for the final step / native-tool agents whose results
+        # already render inline under each tool_use block).
+        result_text = observations[idx + 1] if idx + 1 < len(observations) else ""
+
+        # First step of each node/agent surfaces its system + user prompt.
+        _node_val = (entry.get("cage_span") or {}).get("node") if isinstance(entry.get("cage_span"), dict) else None
+        node_first = node_first_idx.get(str(_node_val) if _node_val else "__root__") == idx
+        system_prompt = user_prompt = ""
+        if node_first:
+            for m in req_msgs:
+                role = str(m.get("role") or "")
+                if not system_prompt and role == "system":
+                    system_prompt = _message_text(m)
+                elif not user_prompt and role in ("user", "human"):
+                    user_prompt = _message_text(m)
+                if system_prompt and user_prompt:
+                    break
 
         # Harness-structure attribution for this call.
         conv_id = forest.call_to_conv.get(idx) if forest else None
@@ -3043,14 +3304,22 @@ def _build_trajectory_payload(
                 "result_len": len(result_text),
                 "result_truncated": len(result_text) > 4000,
             })
+        cage_span = entry.get("cage_span") if isinstance(entry.get("cage_span"), dict) else None
         steps.append({
             "index": idx,
             "ts_ms": entry.get("ts_ms", 0),
+            # LangGraph node that issued this request (from the agent's X-Cage-Node
+            # header, recorded by the proxy). None for agents without the hook.
+            "node": (cage_span or {}).get("node"),
             "tokens": {"in": in_tok, "out": out_tok, "reasoning": reason_tok},
             "cumulative": {"in": cumulative_in, "out": cumulative_out},
             "blocks": blocks,
             "context_summary": context_summary,
             "context_msg_count": len(req_msgs),
+            "result": result_text[:8000],
+            "node_first": node_first,
+            "system_prompt": system_prompt[:16000],
+            "user_prompt": user_prompt[:16000],
             "conversation": conversation,
             "is_compaction_call": is_compaction_call,
             "is_compaction_resume": is_compaction_resume,
@@ -3063,6 +3332,7 @@ def _build_trajectory_payload(
     return {
         "total_steps": total,
         "steps": steps,
+        "node_flow": _node_flow(entries),
         "total_tokens": total_tokens,
         "summary": _trajectory_operator_summary(
             entries,
@@ -3077,6 +3347,39 @@ def _build_trajectory_payload(
         "structure": fweb["structure"],
         "conversations": fweb["conversations"],
     }
+
+
+def _latest_observation_text(entry: dict[str, Any]) -> str:
+    """The latest non-system, non-assistant message in a request = a fed-back
+    tool result. Agents that run tools in Python append the result as the next
+    message, so request N+1's latest observation is the result of action N."""
+    body, _ = _extract_request_body(entry)
+    for msg in reversed(_extract_request_messages(body)):
+        if str(msg.get("role") or "") in ("system", "assistant", "ai", "model"):
+            continue
+        return _message_text(msg)
+    return ""
+
+
+def _node_flow(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse the per-request LangGraph nodes into the route the agent took.
+
+    e.g. ``[{node: global_map, count: 12}, {node: candidate_dev, count: 23}]``.
+    Empty for agents without the cage_trace hook (no ``cage_span`` on entries).
+    Nodes that issue no model request (deterministic Python nodes) never appear —
+    the trajectory is request-based by construction.
+    """
+    flow: list[dict[str, Any]] = []
+    for entry in entries:
+        span = entry.get("cage_span")
+        node = span.get("node") if isinstance(span, dict) else None
+        if not node:
+            continue
+        if flow and flow[-1]["node"] == node:
+            flow[-1]["count"] += 1
+        else:
+            flow.append({"node": str(node), "count": 1})
+    return flow
 
 
 def _trajectory_operator_summary(
@@ -3103,12 +3406,12 @@ def _trajectory_operator_summary(
             name = str(block.get("name") or "unknown")
             tool_counts[name] = tool_counts.get(name, 0) + 1
 
-    top_tools = [
+    tools = [
         {"name": name, "count": count}
         for name, count in sorted(
             tool_counts.items(),
             key=lambda item: (-item[1], item[0]),
-        )[:3]
+        )
     ]
     return {
         "requests": len(entries),
@@ -3116,9 +3419,120 @@ def _trajectory_operator_summary(
         "total_steps": total_steps,
         "total_steps_known": total_steps_known,
         "total_tokens": dict(total_tokens or {}),
-        "top_tools": top_tools,
+        "top_tools": tools[:3],
+        "tools": tools,
+        "tool_calls": sum(tool_counts.values()),
         "last_action": last_action,
         "error_count": error_count,
+    }
+
+
+def _progress_tools_used(trial_dir: Path) -> dict[str, int] | None:
+    """Per-tool counts the proxy already persisted in ``proxy/progress.json``.
+
+    The in-container proxy increments ``tools_used`` on every tool call and
+    writes it to this tiny (~4 KB) file each request, so a run's tool
+    distribution is *already on disk* — no need to re-parse the multi-MB
+    ``proxy.jsonl``. Returns ``None`` only for older runs predating the field,
+    which fall back to the proxy-log parse. An empty dict (trial made no tool
+    calls) is authoritative and returned as-is.
+    """
+    progress = _read_progress_cached(trial_dir / PROXY_DIRNAME / PROGRESS_FILENAME)
+    tools = progress.get("tools_used")
+    if not isinstance(tools, dict):
+        return None
+    out: dict[str, int] = {}
+    for name, count in tools.items():
+        try:
+            out[str(name)] = int(count)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def trial_tool_counts(trial_dir: Path) -> dict[str, int]:
+    """Tool-use ``name`` → call count for one trial.
+
+    Prefers the proxy's already-persisted ``tools_used`` (tiny file); falls back
+    to parsing ``proxy.jsonl`` only for legacy runs that never wrote it.
+    """
+    from_progress = _progress_tools_used(trial_dir)
+    if from_progress is not None:
+        return from_progress
+    proxy_jsonl = resolve_trial_proxy_jsonl(trial_dir)
+    if not proxy_jsonl.exists():
+        return {}
+    return _count_proxy_tools(proxy_jsonl)
+
+
+def _count_proxy_tools(proxy_jsonl: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in _load_success_entries(proxy_jsonl):
+        for block in _extract_blocks(entry, {}):
+            if block.get("type") != "tool_use":
+                continue
+            name = str(block.get("name") or "unknown")
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def aggregate_run_tool_counts(run_dir: Path) -> dict[str, Any]:
+    """Aggregate tool-call distribution across every trial in a run.
+
+    Each trial's per-tool counts are read from the tiny ``proxy/progress.json``
+    the proxy already persisted during the run (legacy runs fall back to a
+    ``proxy.jsonl`` parse), fanned out across trials. Cached in-process on the
+    cheap structural run signature, so repeat loads within a session are
+    instant; a live run recomputes only when a trial is added or resumed.
+    Deliberately writes nothing back into the run tree — adding a file there
+    would bump ``run_dir``'s mtime and invalidate the history/stub caches the
+    detail page depends on.
+    """
+    return get_or_compute(
+        run_tools_cache,
+        run_dir,
+        _shallow_run_signature(run_dir),
+        lambda: _aggregate_run_tool_counts(run_dir),
+    )
+
+
+def _aggregate_run_tool_counts(run_dir: Path) -> dict[str, Any]:
+    trials_root = run_dir / TRIALS_DIRNAME
+    empty = {
+        "tools": [],
+        "total_calls": 0,
+        "trials_counted": 0,
+        "trials_with_tools": 0,
+    }
+    if not trials_root.is_dir():
+        return empty
+    trial_dirs = [meta.parent for meta in _iter_trial_meta_paths(trials_root)]
+    if not trial_dirs:
+        return empty
+
+    totals: dict[str, int] = {}
+    trials_with: dict[str, int] = {}
+    trials_counted = 0
+    trials_with_tools = 0
+    workers = min(_HISTORY_SCAN_WORKERS, len(trial_dirs))
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for counts in pool.map(trial_tool_counts, trial_dirs):
+            trials_counted += 1
+            if counts:
+                trials_with_tools += 1
+            for name, count in counts.items():
+                totals[name] = totals.get(name, 0) + count
+                trials_with[name] = trials_with.get(name, 0) + 1
+
+    tools = [
+        {"name": name, "count": count, "trials": trials_with.get(name, 0)}
+        for name, count in sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    return {
+        "tools": tools,
+        "total_calls": sum(totals.values()),
+        "trials_counted": trials_counted,
+        "trials_with_tools": trials_with_tools,
     }
 
 

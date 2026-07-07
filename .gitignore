@@ -14,6 +14,9 @@ config/models.yml
 config/models.yaml
 config/*.local.yml
 config/*.local.yaml
+# Local backups of the real (secret-bearing) models.yml — never commit.
+config/models.yml.bak*
+config/*.bak
 **/models.local.yml
 **/models.local.yaml
 
@@ -79,6 +82,24 @@ examples/*/local*.yml
 examples/cybergym/datasets/payloads
 examples/cybergym/datasets/server-binary
 examples/cybergym/datasets/image-cache
+# Same, for the arvo-external variants + the transient crane download cache.
+examples/cybergym/datasets/payloads-arvo
+examples/cybergym/datasets/server-binary-arvo
+examples/cybergym/datasets/.dlcache
+
+# Local ARVO task-id selection / working lists — regenerate via the extract/
+# classify scripts. The committed catalogs are the JSON indexes (arvo.json,
+# cybergym.json) + cybergym_images.txt; every other list under datasets/ is local.
+examples/cybergym/datasets/*.txt
+!examples/cybergym/datasets/cybergym_images.txt
+examples/cybergym/datasets/arvo_image_last200.json
+
+# external_arvo: ship only the classification/selection scripts + SCHEMA.md.
+# The generated data (environments.jsonl, *.tsv, features/selected_*) and the
+# internal analysis notes (README, GAP_REPORT, SELECTION_*) stay local.
+examples/cybergym/external_arvo/*
+!examples/cybergym/external_arvo/*.py
+!examples/cybergym/external_arvo/SCHEMA.md
 
 # Internal working/progress plans — never commit (may carry internal infra refs)
 docs/plans/

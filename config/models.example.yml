@@ -22,6 +22,9 @@ models:
   #  Required
   #    provider   Wire-protocol family. Decides how CAGE talks to the endpoint:
   #                 openai | vllm | sglang   -> OpenAI Chat Completions protocol
+  #                 gemini | google          -> Google Generative Language API
+  #                                             (generateContent; for the
+  #                                             gemini_cli agent)
   #                 anthropic (or any other) -> Anthropic Messages protocol
   #               `vllm`/`sglang` additionally mark the endpoint as *self-hosted*
   #               — the only kind eligible for `--wait-for-model` startup polling
@@ -194,4 +197,17 @@ models:
     model: kimi-k2.6
     base_url: https://api.moonshot.cn/v1
     api_key: ${KIMI_API_KEY}
+    timeout: 3600
+
+  # Google Gemini, driven by the `gemini_cli` agent. `provider: gemini` routes
+  # the agent's native generateContent traffic through the proxy to Google
+  # (the proxy forwards byte-for-byte and records an OpenAI-shaped projection
+  # so the inspector parses it). `base_url` is the API origin only — gemini-cli
+  # appends the `/v1beta/...` path itself. The key authenticates via the
+  # `x-goog-api-key` header.
+  gemini-2.5-pro:
+    provider: gemini
+    model: gemini-2.5-pro
+    base_url: https://generativelanguage.googleapis.com
+    api_key: ${GEMINI_API_KEY}
     timeout: 3600

@@ -284,7 +284,8 @@ def generate_traj(proxy_jsonl_path: Path, output_path: Path) -> None:
     parts.append("#" * 72)
     parts.append(
         f"# Harness structure: root_rounds={forest.root_rounds}  "
-        f"subagents={s['num_subagents']}  background_calls={s['num_background_calls']}  "
+        f"subagents={s['num_subagents']}  agents={s.get('num_agents', 0)}  "
+        f"background_calls={s['num_background_calls']}  "
         f"compactions={s['num_compactions']}  max_depth={s['max_depth']}  "
         f"(raw success calls={len(entries)})"
     )

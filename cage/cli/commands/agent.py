@@ -46,7 +46,7 @@ from cage.cli.paths import display_path
 @click.option(
     "--upstream-proxy", "upstream_http_proxy", default="",
     help="HTTP proxy URL the in-container cage-proxy should use to reach the model "
-         "upstream (e.g. http://10.1.2.146:7890). Without RUN_DIR, this is the only "
+         "upstream (e.g. http://<host-ip>:7890). Without RUN_DIR, this is the only "
          "way to set it; with RUN_DIR it overrides the value read from config.yaml.",
 )
 @click.option("--image", default="", help="Override Docker image")
@@ -487,6 +487,56 @@ def debug(
         click.echo("Debug container removed.")
 
 
+def _custom_agent_dirs(cage_root: Path) -> list[Path]:
+    """In-repo custom-agent manifest dirs (``cage/agents/custom/<name>/agent.yml``)."""
+    custom_root = cage_root / "cage" / "agents" / "custom"
+    return [p.parent for p in sorted(custom_root.glob("*/agent.yml"))]
+
+
+def _custom_agent_build_script(name: str, cage_root: Path) -> Path | None:
+    """Absolute path of an in-repo custom agent's declared ``build.script``.
+
+    Returns ``None`` when no in-repo custom agent is named ``name`` (or it has no
+    build recipe). Lets ``cage agent build --agent <name>`` be the ONE build
+    entry point for a custom agent whose image needs more than a single
+    ``docker build`` (it declares ``build: {script: ...}`` in its manifest).
+    """
+    from cage.agents.custom.manifest import load_manifest
+
+    for d in _custom_agent_dirs(cage_root):
+        try:
+            manifest = load_manifest(str(d), d.parent)
+        except Exception:
+            continue
+        if manifest.name != name:
+            continue
+        script = (manifest.build or {}).get("script")
+        if not script:
+            return None
+        script_path = (cage_root / script).resolve()
+        if not script_path.is_file():
+            raise click.ClickException(
+                f"build script not found: {script} (declared by custom agent '{name}')"
+            )
+        return script_path
+    return None
+
+
+def _custom_agent_build_names(cage_root: Path) -> list[str]:
+    """Names of in-repo custom agents that declare a ``build.script``."""
+    from cage.agents.custom.manifest import load_manifest
+
+    names: list[str] = []
+    for d in _custom_agent_dirs(cage_root):
+        try:
+            manifest = load_manifest(str(d), d.parent)
+        except Exception:
+            continue
+        if (manifest.build or {}).get("script"):
+            names.append(manifest.name)
+    return names
+
+
 @click.command("build")
 @click.option(
     "--agent", "agent_name",
@@ -534,8 +584,27 @@ def build(agent_name: str, variant: str, version: str, no_cache: bool, build_all
     agents_to_build = []
     if agent_name:
         if agent_name not in _AGENT_TYPE_REGISTRY:
-            available = ", ".join(sorted(_AGENT_TYPE_REGISTRY.keys()))
-            click.echo(f"Error: unknown agent '{agent_name}'. Available: {available}")
+            # Not a native AgentType — try an in-repo custom agent that ships its
+            # own build recipe (e.g. cairn's multi-image Docker-in-Docker bake a
+            # single `docker build` can't express). This keeps ONE build command
+            # for every agent instead of a separate script the user must know.
+            script_path = _custom_agent_build_script(agent_name, cage_root)
+            if script_path is not None:
+                click.echo(
+                    f"Building custom agent '{agent_name}' via "
+                    f"{script_path.relative_to(cage_root)}..."
+                )
+                if subprocess.run(["bash", str(script_path)], text=True).returncode != 0:
+                    click.echo(f"Error: build failed for custom agent '{agent_name}'")
+                    raise SystemExit(1)
+                click.echo(f"  Built: custom agent '{agent_name}'")
+                return
+            native = ", ".join(sorted(_AGENT_TYPE_REGISTRY.keys()))
+            custom = ", ".join(_custom_agent_build_names(cage_root)) or "(none)"
+            click.echo(
+                f"Error: unknown agent '{agent_name}'. "
+                f"Native: {native}. Custom (buildable): {custom}"
+            )
             raise SystemExit(1)
         agents_to_build = [(agent_name, _AGENT_TYPE_REGISTRY[agent_name])]
     else:

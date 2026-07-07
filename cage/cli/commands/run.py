@@ -309,14 +309,25 @@ def _model_endpoint_reachable(base_url: str, *, timeout: float = 8.0) -> bool:
 
     A 401/403/404 still means the server is up — only connection errors /
     timeouts mean "not yet". Used by --wait-for-model to poll remotely-launched
-    vLLM endpoints until they come online.
+    vLLM / SGLang endpoints until they come online.
+
+    This is a *liveness* probe, not an auth or security check, so TLS
+    certificate verification is disabled. Internal vLLM/SGLang gateways often
+    serve a self-signed or hostname-mismatched cert; with default verification
+    ``urllib`` raises ``SSLCertVerificationError`` even once the server is fully
+    up, which the caller would read as "still down" and wait forever. Skipping
+    verification means "an HTTPS server completed the handshake" counts as up.
     """
+    import ssl
     import urllib.error
     import urllib.request
 
     url = base_url.rstrip("/") + "/models"
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
     try:
-        urllib.request.urlopen(url, timeout=timeout)  # noqa: S310
+        urllib.request.urlopen(url, timeout=timeout, context=ctx)  # noqa: S310
         return True
     except urllib.error.HTTPError:
         return True
@@ -358,30 +369,40 @@ def _wait_for_model_endpoints(
         )
         return
 
+    import sys
+
     start = _time.monotonic()
+    inline = False  # an in-place status line is currently on screen
     while pending:
-        still: list[tuple[str, str]] = []
-        for mid, base_url in pending:
-            if _model_endpoint_reachable(base_url):
-                click.echo(f"  model endpoint up: {mid} ({base_url})")
-            else:
-                still.append((mid, base_url))
-        pending = still
+        pending = [
+            (mid, base_url)
+            for mid, base_url in pending
+            if not _model_endpoint_reachable(base_url)
+        ]
         if not pending:
             break
         elapsed = _time.monotonic() - start
         if timeout and elapsed >= timeout:
+            if inline:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
             down = ", ".join(mid for mid, _ in pending)
             raise click.UsageError(
                 f"--wait-for-model timed out after {int(elapsed)}s; still "
                 f"unreachable: {down}"
             )
+        # One status line, refreshed in place (carriage return + clear-to-EOL)
+        # so a long wait doesn't scroll the terminal with a line per poll.
         names = ", ".join(mid for mid, _ in pending)
-        click.echo(
-            f"  waiting for {len(pending)} model endpoint(s) to come online: "
-            f"{names} — retrying in {int(interval)}s"
+        sys.stdout.write(
+            f"\r  waiting for model endpoint(s) [{names}] … {int(elapsed)}s\x1b[K"
         )
+        sys.stdout.flush()
+        inline = True
         _time.sleep(interval)
+    if inline:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
     click.echo("All model endpoints reachable; starting run.")
 
 
@@ -479,8 +500,8 @@ def _normalize_explicit_sample_ids(sample_ids: tuple[str, ...]) -> tuple[str, ..
     help="Max seconds to wait with --wait-for-model (0 = wait indefinitely).",
 )
 @click.option(
-    "--wait-interval", "wait_interval", type=float, default=10.0,
-    help="Seconds between --wait-for-model polls (default 10).",
+    "--wait-interval", "wait_interval", type=float, default=30.0,
+    help="Seconds between --wait-for-model polls / status refresh (default 30).",
 )
 @click.option("--timeout", type=float, default=None, help="Override runtime.timeout.")
 @click.option(
@@ -527,6 +548,15 @@ def _normalize_explicit_sample_ids(sample_ids: tuple[str, ...]) -> tuple[str, ..
     "set_values",
     multiple=True,
     help="Override a project.yml path, e.g. --set runtime.timeout=7200.",
+)
+@click.option(
+    "--param",
+    "param_values",
+    multiple=True,
+    help=(
+        "Set a custom-agent param, KEY=VALUE (repeatable). Fills a manifest "
+        "{placeholder}; requires selecting one agent with --agent if ambiguous."
+    ),
 )
 @click.option(
     "--max-sample-num",
@@ -634,6 +664,7 @@ def run(
     max_output_tokens: int | None,
     max_cost: float | None,
     set_values: tuple[str, ...],
+    param_values: tuple[str, ...],
     limit: int | None,
     max_trial: int | None,
     sample_ids: tuple[str, ...],
@@ -706,6 +737,7 @@ def run(
         max_output_tokens=max_output_tokens,
         max_cost=max_cost,
         set_values=set_values,
+        param_values=param_values,
     )
     if temp_project is not None:
         ctx.call_on_close(lambda path=temp_project: path.unlink(missing_ok=True))

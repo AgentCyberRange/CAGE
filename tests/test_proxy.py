@@ -18,6 +18,7 @@ from cage.proxy.host import (
     _build_openai_request,
     _translate_messages_anthropic_to_openai,
     _translate_response_openai_to_anthropic,
+    _translate_tool_choice,
     _translate_tools_anthropic_to_openai,
     start_container_proxy,
 )
@@ -74,6 +75,63 @@ class TestMessageTranslation:
         assert result[0]["role"] == "tool"
         assert result[0]["tool_call_id"] == "tu_1"
 
+    def test_tool_result_and_text_ordering(self):
+        # A `tool` message must directly follow the assistant tool_calls turn;
+        # any accompanying text (e.g. a system-reminder Claude Code injects)
+        # goes *after* it, never wedged in between.
+        msgs = [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "tu_1", "name": "bash", "input": {"command": "ls"}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "content": "out"},
+                {"type": "text", "text": "<system-reminder>keep going</system-reminder>"},
+            ]},
+        ]
+        result = _translate_messages_anthropic_to_openai(msgs)
+        assert [m["role"] for m in result] == ["assistant", "tool", "user"]
+        assert result[1]["tool_call_id"] == "tu_1"
+        assert "system-reminder" in result[2]["content"]
+
+    def test_document_block_gets_marker_not_dropped(self):
+        # A base64 PDF the agent Read must not vanish silently.
+        msgs = [{"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "tu_1", "content": "PDF read"},
+            {"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf", "data": "JVBERi0x" * 100}},
+        ]}]
+        result = _translate_messages_anthropic_to_openai(msgs)
+        assert [m["role"] for m in result] == ["tool", "user"]
+        assert "application/pdf" in result[1]["content"]
+        assert "omitted" in result[1]["content"]
+
+    def test_image_in_tool_result_gets_marker(self):
+        msgs = [{"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "tu_1", "content": [
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo"}},
+            ]},
+        ]}]
+        result = _translate_messages_anthropic_to_openai(msgs)
+        assert result[0]["role"] == "tool"
+        assert "image/png" in result[0]["content"]
+
+    def test_inline_text_document_is_unwrapped(self):
+        msgs = [{"role": "user", "content": [
+            {"type": "document", "source": {
+                "type": "text", "media_type": "text/plain", "data": "hello from doc"}},
+        ]}]
+        result = _translate_messages_anthropic_to_openai(msgs)
+        assert result[0]["content"] == "hello from doc"
+
+    def test_thinking_block_is_dropped(self):
+        msgs = [{"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "secret reasoning"},
+            {"type": "text", "text": "answer"},
+        ]}]
+        result = _translate_messages_anthropic_to_openai(msgs)
+        assert result == [{"role": "assistant", "content": "answer"}]
+
 
 class TestResponseTranslation:
     def test_text_response(self):
@@ -110,6 +168,44 @@ class TestResponseTranslation:
         assert len(tool_use) == 1
         assert tool_use[0]["name"] == "bash"
         assert tool_use[0]["input"] == {"command": "ls"}
+
+    def test_tool_call_in_reasoning_content_is_recovered(self):
+        # Thinking models w/o a tool parser emit <tool_call> XML inside
+        # reasoning_content with an empty content field — must not be lost.
+        resp = {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "reasoning_content":
+                        '<tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>',
+                },
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        result = _translate_response_openai_to_anthropic(
+            request_id="req-1", model="qwen", response=resp
+        )
+        assert result["stop_reason"] == "tool_use"
+        tool_use = [b for b in result["content"] if b["type"] == "tool_use"]
+        assert len(tool_use) == 1
+        assert tool_use[0]["name"] == "bash"
+        assert tool_use[0]["input"] == {"command": "ls"}
+
+    def test_usage_cache_read_tokens_passthrough(self):
+        resp = {
+            "choices": [{"message": {"content": "x"}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 100, "completion_tokens": 20,
+                "prompt_tokens_details": {"cached_tokens": 80},
+            },
+        }
+        result = _translate_response_openai_to_anthropic(
+            request_id="req-1", model="llama", response=resp
+        )
+        assert result["usage"]["input_tokens"] == 100
+        assert result["usage"]["output_tokens"] == 20
+        assert result["usage"]["cache_read_input_tokens"] == 80
 
     def test_string_tool_call_response_becomes_tool_use(self):
         resp = {
@@ -313,6 +409,24 @@ class TestBuildOpenaiRequest:
         payload, _, _ = _build_openai_request(anthropic_req, modify_rules=[])
         assert "tools" in payload
         assert payload["tools"][0]["type"] == "function"
+
+    def test_tool_choice_and_stop_sequences_translated(self):
+        anthropic_req = {
+            "model": "claude-3",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tools": [{"name": "bash", "description": "", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "tool", "name": "bash"},
+            "stop_sequences": ["\n\nHuman:"],
+        }
+        payload, _, _ = _build_openai_request(anthropic_req, modify_rules=[])
+        assert payload["tool_choice"] == {"type": "function", "function": {"name": "bash"}}
+        assert payload["stop"] == ["\n\nHuman:"]
+
+    def test_tool_choice_any_maps_to_required(self):
+        assert _translate_tool_choice({"type": "any"}) == "required"
+        assert _translate_tool_choice({"type": "auto"}) == "auto"
+        assert _translate_tool_choice({"type": "none"}) == "none"
+        assert _translate_tool_choice(None) is None
 
     def test_upstream_extra_body_injects_and_overrides(self):
         # Registry-pinned inference config (e.g. Qwen nothink + sampling) is
@@ -1558,3 +1672,111 @@ class TestSanitizeAssistantToolCallArguments:
         # itself handles non-JSON requests transparently.
         assert repairs == []
         assert new_body is raw
+
+
+class TestGeminiProjection:
+    """Gemini ``generateContent`` calls are forwarded byte-for-byte but
+    recorded as an OpenAI-shaped projection so the inspector parses them."""
+
+    def test_route_detection(self):
+        assert container_proxy._is_gemini_route(
+            "/v1beta/models/gemini-2.5-pro:streamGenerateContent"
+        )
+        assert container_proxy._is_gemini_route(
+            "/v1beta/models/gemini-2.5-pro:generateContent"
+        )
+        # countTokens, chat-completions and messages fall through to the
+        # plain transparent forward.
+        assert not container_proxy._is_gemini_route(
+            "/v1beta/models/gemini-2.5-pro:countTokens"
+        )
+        assert not container_proxy._is_gemini_route("/v1/chat/completions")
+        assert not container_proxy._is_gemini_route("/v1/messages")
+
+    def test_request_projection_system_tools_and_function_turns(self):
+        gem_req = {
+            "systemInstruction": {"parts": [{"text": "You are an agent."}]},
+            "contents": [
+                {"role": "user", "parts": [{"text": "run ls"}]},
+                {"role": "model", "parts": [
+                    {"functionCall": {"name": "sh", "args": {"cmd": "ls"}}}
+                ]},
+                {"role": "user", "parts": [
+                    {"functionResponse": {"name": "sh", "response": {"out": "flag.txt"}}}
+                ]},
+            ],
+            "tools": [{"functionDeclarations": [
+                {"name": "sh", "description": "run", "parameters": {"type": "object"}}
+            ]}],
+        }
+        out = container_proxy._gemini_request_to_openai(
+            gem_req, "/v1beta/models/gemini-2.5-pro:streamGenerateContent"
+        )
+        assert out["model"] == "gemini-2.5-pro"
+        assert [m["role"] for m in out["messages"]] == [
+            "system", "user", "assistant", "tool",
+        ]
+        assistant = out["messages"][2]
+        assert assistant["tool_calls"][0]["function"]["name"] == "sh"
+        assert json.loads(assistant["tool_calls"][0]["function"]["arguments"]) == {"cmd": "ls"}
+        assert out["tools"][0]["function"]["name"] == "sh"
+
+    def test_response_projection_text_and_usage(self):
+        gem_resp = {
+            "candidates": [{
+                "content": {"parts": [{"text": "Hello"}], "role": "model"},
+                "finishReason": "STOP",
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 5,
+                "candidatesTokenCount": 2,
+                "thoughtsTokenCount": 10,
+                "totalTokenCount": 17,
+            },
+            "modelVersion": "gemini-2.5-flash",
+            "responseId": "abc",
+        }
+        out = container_proxy._gemini_response_to_openai(gem_resp, request_id="r1")
+        msg = out["choices"][0]["message"]
+        assert msg["content"] == "Hello"
+        assert out["choices"][0]["finish_reason"] == "stop"
+        # OpenAI convention: completion_tokens includes reasoning (thoughts).
+        assert out["usage"]["prompt_tokens"] == 5
+        assert out["usage"]["completion_tokens"] == 12
+        assert out["usage"]["completion_tokens_details"]["reasoning_tokens"] == 10
+
+    def test_response_projection_tool_call(self):
+        gem_resp = {
+            "candidates": [{
+                "content": {"parts": [
+                    {"functionCall": {"name": "web_fetch", "args": {"url": "http://x"}}}
+                ]},
+                "finishReason": "STOP",
+            }],
+            "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 3, "totalTokenCount": 5},
+        }
+        out = container_proxy._gemini_response_to_openai(gem_resp, request_id="r2")
+        tc = out["choices"][0]["message"]["tool_calls"][0]
+        assert tc["function"]["name"] == "web_fetch"
+        assert json.loads(tc["function"]["arguments"]) == {"url": "http://x"}
+        # A tool call overrides the STOP finish reason.
+        assert out["choices"][0]["finish_reason"] == "tool_calls"
+
+    def test_stream_merge_then_project(self):
+        acc = None
+        for chunk in [
+            {"candidates": [{"content": {"parts": [{"text": "Hel"}]}}]},
+            {
+                "candidates": [{
+                    "content": {"parts": [{"text": "lo"}]},
+                    "finishReason": "STOP",
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 3, "candidatesTokenCount": 2, "totalTokenCount": 5,
+                },
+            },
+        ]:
+            acc = container_proxy._gemini_merge_stream_chunk(acc, chunk)
+        out = container_proxy._gemini_response_to_openai(acc, request_id="r3")
+        assert out["choices"][0]["message"]["content"] == "Hello"
+        assert out["usage"]["prompt_tokens"] == 3

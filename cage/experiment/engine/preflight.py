@@ -456,7 +456,13 @@ def _check_proxy_chain(
     if network_mode:
         cmd.extend(["--network", network_mode])
     cmd.extend(["--add-host", "host.docker.internal:host-gateway"])
-    cmd.extend([image, "sleep", "60"])
+    # TTL must outlive this check's own request budget: setup + up to two model
+    # pings (``--max-time`` each, see below). A slow reasoning model (e.g. GLM
+    # spends ~35s emitting reasoning_content even for a 5-token "hi") otherwise
+    # exhausts a short TTL, the container exits, and the in-flight ``docker exec
+    # curl`` is SIGKILLed -> a confusing "curl exited 137" instead of a clean
+    # timeout. Removed in ``finally`` regardless.
+    cmd.extend([image, "sleep", "240"])
 
     rc, _, err = _run_cmd(cmd, timeout=120.0)
     if rc != 0:
@@ -542,13 +548,31 @@ def _check_proxy_chain(
                 "messages": [{"role": "user", "content": "hi"}],
             })
             rc_t, out_t, _ = _run_cmd(
-                ["docker", "exec", cname, "curl", "-s", "--max-time", "30",
+                ["docker", "exec", cname, "curl", "-s", "--max-time", "90",
                  "-X", "POST", f"http://localhost:{proxy_port}/v1/messages",
                  "-H", "Content-Type: application/json",
                  "-H", f"x-api-key: {upstream_key}",
                  "-H", "anthropic-version: 2023-06-01",
                  "-d", payload],
-                timeout=45.0,
+                timeout=100.0,
+            )
+        elif protocol == "google":
+            # Google Gemini: /v1beta/models/{model}:generateContent. Auth is
+            # the ``x-goog-api-key`` header — Google 401s if a Bearer token is
+            # attached alongside it, so the proxy must not inject one (it skips
+            # injection when x-goog-api-key is present).
+            payload = json.dumps({
+                "contents": [{"parts": [{"text": "hi"}]}],
+                "generationConfig": {"maxOutputTokens": 5},
+            })
+            rc_t, out_t, _ = _run_cmd(
+                ["docker", "exec", cname, "curl", "-s", "--max-time", "90",
+                 "-X", "POST",
+                 f"http://localhost:{proxy_port}/v1beta/models/{_model_bare}:generateContent",
+                 "-H", "Content-Type: application/json",
+                 "-H", f"x-goog-api-key: {upstream_key}",
+                 "-d", payload],
+                timeout=100.0,
             )
         else:
             # OpenAI: /v1/chat/completions (standard) or /v1/responses
@@ -557,12 +581,12 @@ def _check_proxy_chain(
                 "messages": [{"role": "user", "content": "hi"}],
             })
             rc_t, out_t, _ = _run_cmd(
-                ["docker", "exec", cname, "curl", "-s", "--max-time", "30",
+                ["docker", "exec", cname, "curl", "-s", "--max-time", "90",
                  "-X", "POST", f"http://localhost:{proxy_port}/v1/chat/completions",
                  "-H", "Content-Type: application/json",
                  "-H", f"Authorization: Bearer {upstream_key}",
                  "-d", payload],
-                timeout=45.0,
+                timeout=100.0,
             )
             # If chat/completions fails (e.g. responses-only API), try
             # /v1/responses. Codex-relay endpoints mandate ``stream: true``
@@ -577,12 +601,12 @@ def _check_proxy_chain(
                     "store": False, "stream": True,
                 })
                 rc_t, out_t, _ = _run_cmd(
-                    ["docker", "exec", cname, "curl", "-s", "--max-time", "30",
+                    ["docker", "exec", cname, "curl", "-s", "--max-time", "90",
                      "-X", "POST", f"http://localhost:{proxy_port}/v1/responses",
                      "-H", "Content-Type: application/json",
                      "-H", f"Authorization: Bearer {upstream_key}",
                      "-d", payload_r],
-                    timeout=45.0,
+                    timeout=100.0,
                 )
 
         ok, fail_reason = _validate_proxy_response(out_t, curl_exit=rc_t)

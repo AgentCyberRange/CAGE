@@ -156,23 +156,17 @@ def _mark_canonical_run_output_artifacts(
         )
 
 
-def _save_canonical_experiment_snapshot(
+def _build_canonical_run_spec(
     run: ExperimentRun,
     agent: AgentInstance,
-    storage: RunStorage,
     trials: list[Trial],
     run_id: str,
-) -> None:
-    """Write canonical Experiment contract artifacts for one legacy agent run.
+) -> tuple[Any, Any]:
+    """Resolve the canonical ``(spec, plan)`` for one single-agent run.
 
-    The current orchestrator still schedules each agent under its own
-    ``.cage_runs/<agent_label>/<run_id>`` directory. Until ``ExperimentRun`` owns
-    a unified run directory, this helper snapshots the resolved single-agent
-    plan beside the existing legacy artifacts. It has no runtime side effects
-    beyond writing JSON files, and it runs after resume compatibility checks so
-    a changed trial plan cannot overwrite old run metadata.
+    Shared by the full initial-snapshot write and the resume-time spec refresh
+    so both project the exact same resolved config.
     """
-
     spec_source = run.spec or experiment_spec_from_project_mapping(
         {},
         project_file=run.project_file,
@@ -211,6 +205,51 @@ def _save_canonical_experiment_snapshot(
         max_concurrent=agent.max_concurrent,
     )
     plan = plan_from_trial_sequence(spec, subject=subject, trials=trials)
+    return spec, plan
+
+
+def _refresh_canonical_spec_snapshot(
+    run: ExperimentRun,
+    agent: AgentInstance,
+    storage: RunStorage,
+    trials: list[Trial],
+    run_id: str,
+) -> None:
+    """Refresh only ``experiment_spec.json`` on resume.
+
+    Resume preserves the canonical record + per-trial evidence (see
+    ``_resume_should_preserve_canonical_snapshot``), which skips the full
+    snapshot write — so the spec projection keeps the original invocation's
+    config and drifts from what actually executes (resolved fresh from the
+    current YAML each run). Rewrite just the spec file to the current resolved
+    config; it is a pure projection nothing executes from, so this touches no
+    preserved evidence. Best-effort: a failure must never abort a resume.
+    """
+    try:
+        spec, _plan = _build_canonical_run_spec(run, agent, trials, run_id)
+        ExperimentArtifactWriter(storage.run_dir).refresh_spec(spec)
+    except Exception as exc:  # noqa: BLE001 - cosmetic projection refresh
+        logger.warning("resume: could not refresh experiment_spec.json: %s", exc)
+
+
+def _save_canonical_experiment_snapshot(
+    run: ExperimentRun,
+    agent: AgentInstance,
+    storage: RunStorage,
+    trials: list[Trial],
+    run_id: str,
+) -> None:
+    """Write canonical Experiment contract artifacts for one legacy agent run.
+
+    The current orchestrator still schedules each agent under its own
+    ``.cage_runs/<agent_label>/<run_id>`` directory. Until ``ExperimentRun`` owns
+    a unified run directory, this helper snapshots the resolved single-agent
+    plan beside the existing legacy artifacts. It has no runtime side effects
+    beyond writing JSON files, and it runs after resume compatibility checks so
+    a changed trial plan cannot overwrite old run metadata.
+    """
+
+    spec, plan = _build_canonical_run_spec(run, agent, trials, run_id)
     writer = ExperimentArtifactWriter(storage.run_dir)
     writer.write_initial_snapshot(
         spec=spec,

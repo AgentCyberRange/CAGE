@@ -1,0 +1,54 @@
+# Cairn as a Cage custom agent (manifest-driven — zero framework code).
+#
+# Cairn is the multi-worker blackboard pentest engine; its source is the pinned
+# submodule third_party/Cairn (this manifest + entrypoint are our in-tree glue). This
+# manifest runs the WHOLE engine (Server + Dispatcher + Claude-Code workers)
+# inside ONE Cage trial container via Docker-in-Docker, so Cage owns per-trial
+# hard isolation (the per_trial_bridge) while Cairn owns the intra-trial OODA
+# search. The orchestration lives entirely in cairn_cage_entry.py (copied into
+# the container by Cage); the Cairn engine itself is vendored UNCHANGED in the
+# image (docker/cairn.Dockerfile).
+name: cairn
+
+# DinD trial image: dockerd + Cairn engine (submodule) + claude. The build is a
+# 3-image bake (engine -> worker -> bake the worker tar into the final image, so
+# the empty inner daemon can `docker load` it) that a single `docker build` can't
+# express — so it ships a build script `cage agent build` runs (see `build:`).
+image: cage/cairn:latest
+
+# ONE build path for every agent: `cage agent build --agent cairn` runs this.
+build:
+  script: docker/build_cairn.sh
+
+# Cairn runs its own Docker daemon inside the trial container — needs privileged.
+privileged: true
+
+workdir: .
+output: stdout
+
+# Author defaults for the manifest's own {placeholders}. Override per-run from
+# the experiment yaml (agents[].params) or `cage run --param k=v`.
+params:
+  # Intra-trial worker concurrency (N parallel claude workers, all -> Cage proxy).
+  workers: "2"
+  # Inner worker image. Self-contained default; for full Kali capability parity
+  # point this at ghcr.io/oritera/cairn-worker-container (set worker_tar empty
+  # and ensure the inner daemon can pull it).
+  worker_image: "cage/cairn-worker:latest"
+  # Wall-clock budget for the whole project (seconds).
+  timeout: "3600"
+
+# {task_instruction} arrives shlex-quoted; the reserved {base_url}/{api_key}/
+# {model_name}/{max_rounds} are filled by Cage (base_url = the in-container proxy,
+# bare for the anthropic protocol). The worker (network_mode=host under the inner
+# daemon) reaches that proxy on localhost.
+command: >
+  python3 cairn_cage_entry.py
+  --instruction {task_instruction}
+  --base-url "{base_url}"
+  --api-key "{api_key}"
+  --model "{model_name}"
+  --budget {max_rounds}
+  --workers {workers}
+  --worker-image "{worker_image}"
+  --timeout {timeout}

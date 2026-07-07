@@ -1,0 +1,31 @@
+# Keep the Docker build context lean. Agent images (docker/*.Dockerfile) only
+# COPY a few files (e.g. cage/proxy/sidecar.py, third_party/Cairn/cairn/src/cairn);
+# everything below is pure bloat that would otherwise be tarred up and shipped
+# to the daemon on every build.
+**/.git
+**/.cage_runs
+**/__pycache__
+**/*.pyc
+**/node_modules
+*.tar
+*.tar.gz
+*.bak
+*.bak.*
+artifacts/
+
+# Vendored reference checkouts that no image build needs. (The Cairn engine the
+# cairn image DOES need is the submodule third_party/Cairn, which is kept — only
+# its .git is dropped, by the **/.git rule above.)
+references/agentic-poc/
+references/BoxPwnr/
+references/HackWorld/
+references/OpenViking/
+references/PentestBench/
+references/claude-tap/
+references/cybergym/
+references/defending-code-reference-harness/
+references/mini-swe-agent/
+references/post-exploitation-range/
+
+# Benchmark dataset submodules are large and not needed to build agent images.
+examples/*/datasets/

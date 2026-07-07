@@ -55,3 +55,9 @@ agents:
       - /home/agent/.claude
     session_args:
       - --verbose
+  # Google Gemini CLI. Pair with a `provider: gemini` model, e.g.
+  #   cage run examples/strongreject/default_strongreject.yml \
+  #       --agent gemini_cli --model gemini-2.5-pro
+  - id: gemini_cli
+    kind: gemini_cli
+    home: /home/agent/workspace

@@ -177,6 +177,19 @@
   </span>
 </div>
 
+<!-- Tool call distribution (aggregated across all trials, loaded async) -->
+<details id="run-tool-distribution"
+         class="mb-5 bg-surface rounded-xl border border-slate-700/50 overflow-hidden"
+         data-tools-endpoint="/api/run/{{ run_dir | encode_path }}/tools">
+  <summary class="cursor-pointer select-none px-6 py-4 text-sm font-semibold text-white hover:text-slate-200 flex items-center gap-2">
+    Tool call distribution
+    <span id="run-tool-distribution-meta" class="text-xs font-normal text-slate-500"></span>
+  </summary>
+  <div id="run-tool-distribution-body" class="px-6 pb-5 pt-1">
+    <p class="text-sm text-slate-500">Loading tool usage across all trials…</p>
+  </div>
+</details>
+
 <!-- Trials table -->
 <div class="bg-surface rounded-xl border border-slate-700/50 overflow-hidden"
      id="trial-filters"
@@ -184,7 +197,7 @@
   <div class="px-6 py-4 border-b border-slate-700/50 space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="text-lg font-semibold text-white">Trials ({{ trials | length }})</h2>
+        <h2 class="text-lg font-semibold text-white">Trials ({{ pagination.total if pagination else (trials | length) }})</h2>
         <p id="trial-filter-summary" class="text-xs text-slate-500 mt-1">Showing all trials by default</p>
       </div>
       <div class="flex items-center gap-2">
@@ -278,125 +291,24 @@
           <th class="text-left px-6 py-3 max-w-md">Output</th>
         </tr>
       </thead>
-      <tbody>
-        {% for t in trials %}
-        <tr class="border-b border-slate-700/20 hover:bg-slate-800/50 transition-colors"
-            data-trial-row
-            data-trial-id="{{ t.id }}"
-            data-duration-ms="{{ t.info.get('duration_ms', 0) }}"
-            data-status-kind="{{ t.info.get('status_kind', 'pending') }}"
-            data-status-label="{{ t.info.get('status_label', 'Pending') }}"
-            data-running="{{ 'true' if t.info.get('running') else 'false' }}"
-            data-has-artifacts="{{ 'true' if t.info.get('has_artifacts', True) else 'false' }}"
-            data-sort-index="{{ t.get('sort_index', loop.index0) }}"
-            data-tags="{{ t.info.get('tags', []) | join('||') }}"
-            data-search="{{ (t.id ~ ' ' ~ t.info.get('output', '')[:300]) | lower }}">
-          {# Row counter for the current display order. Rows render in natural
-             trial order (``data-sort-index``, the planned order), the same order
-             live polling keeps — status never reshuffles the table. #}
-          <td class="px-6 py-3 text-slate-500" data-cell="row-index"
-              {% if t.info.get('trial_index') is not none %}title="planned index: {{ t.info.trial_index }}"{% endif %}>{{ loop.index }}</td>
-          <td class="px-6 py-3">
-            {# Always a link — even interrupted/errored/pending trials have a
-               detail page (status, meta, events). Dim it when there are no
-               agent artifacts yet, but never make it unclickable. #}
-            <a data-cell-target="trial-link" href="{{ trial_url(t.dir, run_dir) }}"
-               class="font-mono text-xs {{ 'text-blue-300 hover:text-blue-200' if t.info.get('has_artifacts', True) else 'text-slate-400 hover:text-slate-200' }}"
-               {% if not t.info.get('has_artifacts', True) %}title="No agent artifacts yet — opens status, meta, and events"{% endif %}>{{ t.id }}</a>
-            {% if t.info.get('tags') %}
-            <div class="mt-1 flex max-w-sm flex-wrap gap-1">
-              {% for tag in t.info.tags[:6] %}
-              <span class="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[11px] text-slate-400">{{ tag }}</span>
-              {% endfor %}
-            </div>
-            {% endif %}
-          </td>
-          <td class="px-6 py-3 whitespace-nowrap" data-cell="status">
-            {% set status_kind = t.info.get('status_kind', 'pending') %}
-            <span data-cell-target="badge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-semibold
-              {% if status_kind == 'running' %}bg-sky-500/15 text-sky-300 border-sky-500/30
-              {% elif status_kind == 'success' %}bg-green-500/10 text-green-300 border-green-500/20
-              {% elif status_kind == 'live_success' %}bg-green-500/10 text-green-300 border-green-500/20
-              {% elif status_kind == 'warning' %}bg-yellow-500/10 text-yellow-300 border-yellow-500/20
-              {% elif status_kind == 'error' %}bg-red-500/10 text-red-300 border-red-500/20
-              {% else %}bg-slate-700/50 text-slate-300 border-slate-600{% endif %}"
-                  {% if status_kind == 'live_success' %}title="Target validator reported success. Open the trial for details."{% endif %}>
-              {% if status_kind == 'running' %}
-              <span class="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse"></span>
-              {% endif %}
-              <span data-cell-target="label">{{ t.info.get('status_label', 'Pending') }}</span>
-            </span>
-            <div data-cell-target="detail" class="mt-1 max-w-48 truncate text-xs text-slate-500{% if not t.info.get('status_detail') %} hidden{% endif %}" title="{{ t.info.status_detail|default('') }}">
-              {{ t.info.get('status_detail', '') }}
-            </div>
-          </td>
-          <td class="px-6 py-3">
-            {% for metric, val in t.info.get('scores', {}).items() %}
-            <span class="font-semibold
-              {% if val >= 0.7 %}text-green-400{% elif val > 0 %}text-yellow-400{% else %}text-slate-400{% endif %}">
-              {{ "%.2f"|format(val) }}
-            </span>
-            {% endfor %}
-            {% if not t.info.get('scores') %}<span class="text-slate-500">-</span>{% endif %}
-          </td>
-          <td class="px-6 py-3 text-slate-300" data-cell="duration">
-            {{ t.info.get('duration_ms', 0) | fmt_duration }}
-          </td>
-          <td class="px-6 py-3" data-cell="exit">
-            <span class="{% if t.info.get('exit_code', -1) == 0 %}text-green-400{% else %}text-yellow-400{% endif %}">
-              {{ t.info.get('exit_code', '-') }}
-            </span>
-          </td>
-          <td class="px-6 py-3 text-xs whitespace-nowrap" data-cell="progress">
-            {% set p = t.info.get('progress') %}
-            {% if p %}
-            {% set total = p.get('total_requests', 0) %}
-            {% set errors = p.get('errors', 0) %}
-            <div class="flex items-center gap-2">
-              {% if t.info.get('running') %}
-              <span data-cell-target="progress-dot" class="inline-flex h-2 w-2 rounded-full bg-sky-400 animate-pulse"></span>
-              <span data-cell-target="steps" class="text-sky-300 font-semibold">{{ total }} steps</span>
-              {% else %}
-              <span data-cell-target="steps" class="text-slate-300 font-semibold">{{ total }} steps</span>
-              {% endif %}
-            </div>
-            <div data-cell-target="errors" class="{% if errors %}text-yellow-300{% else %}text-slate-500{% endif %}">
-              {{ "%.1f"|format((errors * 100.0 / total) if total else 0) }}% errors
-            </div>
-            <div class="text-slate-500">active <span data-age-ts="{{ p.get('last_ts_ms', 0) }}" data-cell-target="age">{{ p.get('last_ts_ms', 0) | fmt_age }}</span></div>
-            {% else %}
-            <span class="text-slate-500" data-cell-target="steps">-</span>
-            {% endif %}
-          </td>
-          <td class="px-6 py-3 text-slate-400 text-xs whitespace-nowrap" data-cell="usage">
-            {% set u = t.info.get('usage', {}) %}
-            {% set cost_usd = u.get('cost_usd', 0) %}
-            {% if u.get('input_tokens') or cost_usd %}
-            <span data-cell-target="usage-text">
-              {% if u.get('input_tokens') %}{{ u.input_tokens | fmt_tokens }} in / {{ u.get('output_tokens', 0) | fmt_tokens }} out{% else %}-{% endif %}
-            </span>
-            <br><span data-cell-target="usage-reqs">{{ u.get('num_requests', 0) }} reqs</span>
-            <br><span data-cell-target="usage-cost" class="{% if not cost_usd %}hidden{% endif %}">{% if cost_usd %}${{ "%.4f"|format(cost_usd) }}{% endif %}</span>
-            {% else %}
-            <span data-cell-target="usage-text">-</span>
-            <br><span data-cell-target="usage-reqs" class="text-slate-500">0 reqs</span>
-            <br><span data-cell-target="usage-cost" class="hidden"></span>
-            {% endif %}
-          </td>
-          <td class="px-6 py-3 align-top max-w-md" data-cell="output">
-            <p class="text-slate-300 text-xs truncate" data-cell-target="output-text">
-              {% if t.info.get('running') and t.info.get('progress') %}
-              Running · {{ t.info.progress.get('last_status', '?') }}
-              {% else %}
-              {{ t.info.get('output', '')[:150] }}
-              {% endif %}
-            </p>
-          </td>
-        </tr>
-        {% endfor %}
+      <tbody id="trial-rows-body">
+        {% include "_trial_rows.html" %}
       </tbody>
     </table>
   </div>
+  {% if pagination and pagination.total > pagination.loaded %}
+  {# Large run: only the first page is server-rendered. The rest stream in on
+     scroll via /api/run/<encoded>/rows so first paint stays fast. #}
+  <div id="trial-pager"
+       data-encoded="{{ pagination.encoded }}"
+       data-total="{{ pagination.total }}"
+       data-loaded="{{ pagination.loaded }}"
+       data-page-size="{{ pagination.page_size }}"
+       class="px-6 py-4 text-center text-xs text-slate-500">
+    <span data-pager-status>Showing {{ pagination.loaded }} of {{ pagination.total }} trials</span>
+    <span data-pager-spinner class="hidden ml-2 text-sky-300">loading…</span>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -494,7 +406,14 @@ function applyTrialFilters() {
     const presetText = activePreset
       ? ` · preset: ${AUDIT_PRESET_LABELS[activePreset] || activePreset}`
       : '';
-    trialFilters.summary.textContent = `Showing ${visible} / ${total} trials${presetText}${durationText}${tagText}`;
+    // On a paginated run not every row is in the DOM yet; report against the
+    // true trial total (from the pager) so it never reads e.g. "160 / 160"
+    // while 946 exist. The denominator settles to the DOM count once the pager
+    // is gone (all pages loaded).
+    const pager = document.getElementById('trial-pager');
+    const trueTotal = pager ? Math.max(total, Number(pager.dataset.total || total)) : total;
+    const stillLoading = trueTotal > total ? ` · loading ${total}/${trueTotal}…` : '';
+    trialFilters.summary.textContent = `Showing ${visible} / ${trueTotal} trials${presetText}${durationText}${tagText}${stillLoading}`;
   }
   renderSelectedTrialTags();
 }
@@ -645,6 +564,82 @@ applyTrialFilters();
     io.observe(row);
   }
 
+  /* ------------ pagination (large runs) ------------- */
+  // Large runs render only the first page server-side; the rest stream in here
+  // as server-rendered HTML fragments (same _trial_rows.html partial) so first
+  // paint stays fast regardless of trial count.
+  const pagerEl = document.getElementById('trial-pager');
+  const rowsBody = document.getElementById('trial-rows-body');
+  let pagerLoading = false;
+  let pagerDone = !pagerEl;   // non-paginated pages are "done" from the start
+
+  async function loadNextTrialPage() {
+    if (pagerDone || pagerLoading || !pagerEl || !rowsBody) return false;
+    const total = Number(pagerEl.dataset.total || 0);
+    const pageSize = Number(pagerEl.dataset.pageSize || 80);
+    const loaded = Number(pagerEl.dataset.loaded || 0);
+    if (loaded >= total) { pagerDone = true; return false; }
+    pagerLoading = true;
+    setHidden(pagerEl.querySelector('[data-pager-spinner]'), false);
+    try {
+      const resp = await fetch(`/api/run/${pagerEl.dataset.encoded}/rows?offset=${loaded}&limit=${pageSize}`);
+      if (!resp.ok) throw new Error('rows ' + resp.status);
+      const data = await resp.json();
+      if (data.html) {
+        const tmp = document.createElement('tbody');
+        tmp.innerHTML = data.html;
+        for (const row of Array.from(tmp.children)) {
+          rowsBody.appendChild(row);
+          if (row.matches && row.matches('[data-trial-row]')) io.observe(row);
+        }
+      }
+      const next = (data.next_offset != null) ? data.next_offset : loaded + (data.loaded || 0);
+      pagerEl.dataset.loaded = String(next);
+      const status = pagerEl.querySelector('[data-pager-status]');
+      if (status) setText(status, `Showing ${Math.min(next, total)} of ${total} trials`);
+      if (!data.has_more || (data.loaded || 0) === 0) {
+        pagerDone = true;
+        pagerEl.remove();
+      }
+      if (typeof applyTrialFilters === 'function') applyTrialFilters();
+      reorderTrialRows();
+      return !pagerDone;
+    } catch (err) {
+      // Leave the pager in place; scrolling again retries.
+      return false;
+    } finally {
+      pagerLoading = false;
+      const spinner = pagerEl ? pagerEl.querySelector('[data-pager-spinner]') : null;
+      if (spinner) setHidden(spinner, true);
+    }
+  }
+
+  async function loadAllTrialPages() {
+    let guard = 0;
+    while (!pagerDone && guard < 1000) { guard += 1; if (!await loadNextTrialPage()) break; }
+  }
+
+  if (pagerEl) {
+    // Auto-load the next page as the pager nears the viewport (covers fast
+    // scrolling that outruns the eager background fill below).
+    new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadNextTrialPage();
+    }, { rootMargin: '600px 0px' }).observe(pagerEl);
+
+    // Eagerly fill the rest of the table in the background once the first page
+    // has painted, rather than waiting for the user to scroll to the bottom.
+    // First paint already happened server-side (only the first page is
+    // rendered inline), so this keeps the page complete without slowing the
+    // initial render. ``loadAllTrialPages`` walks pages sequentially, so it
+    // stays gentle on NAS and yields between fetches.
+    const startEagerFill = () => { loadAllTrialPages(); };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(startEagerFill, { timeout: 1200 });
+    } else {
+      setTimeout(startEagerFill, 250);
+    }
+  }
+
   /* ------------ patchers ------------- */
 
   function patchSummary(summary) {
@@ -779,7 +774,11 @@ applyTrialFilters();
 
     if (t.progress) {
       const stepsEl = row.querySelector('[data-cell-target="steps"]');
-      setText(stepsEl, `${t.progress.total} steps`);
+      // "steps" = canonical agent rounds (successful, = max_rounds counter),
+      // not total_requests which also counts failed 529 retries. total stays
+      // the error-rate denominator below.
+      const steps = (t.progress.successful != null) ? t.progress.successful : t.progress.total;
+      setText(stepsEl, `${steps} steps`);
       const errorsEl = row.querySelector('[data-cell-target="errors"]');
       if (errorsEl) {
         const pct = t.progress.total ? (t.progress.errors * 100 / t.progress.total) : 0;
@@ -916,7 +915,10 @@ applyTrialFilters();
       lastUpdate = Date.now();
       patchSummary(payload.summary);
       for (const t of payload.trials || []) {
-        if (!patchTrial(t)) {
+        // A row we can't find is only "new" once every page has been loaded.
+        // While pagination still has pages pending, an unmatched trial is just
+        // not-yet-loaded, not a freshly appeared trial — don't trigger a reload.
+        if (!patchTrial(t) && pagerDone) {
           unknownRowSeen = true;
         }
       }
@@ -927,6 +929,53 @@ applyTrialFilters();
       }
     },
   });
+})();
+
+// ========== AGGREGATE TOOL DISTRIBUTION (lazy, on first expand) ==========
+(function () {
+  const root = document.getElementById('run-tool-distribution');
+  if (!root) return;
+  const body = document.getElementById('run-tool-distribution-body');
+  const meta = document.getElementById('run-tool-distribution-meta');
+  const endpoint = root.dataset.toolsEndpoint;
+  const COLORS = ['#38bdf8', '#34d399', '#a78bfa', '#fbbf24', '#f472b6', '#22d3ee', '#fb923c', '#a3e635'];
+  let loaded = false;
+  const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  function render(data) {
+    const tools = (data && data.tools) || [];
+    if (!tools.length) {
+      body.innerHTML = '<p class="text-sm text-slate-500">No tool calls recorded for this run.</p>';
+      return;
+    }
+    const total = Number(data.total_calls || tools.reduce((s, t) => s + (t.count || 0), 0));
+    const max = tools.reduce((m, t) => Math.max(m, t.count || 0), 0) || 1;
+    if (meta) meta.textContent = `· ${total} calls · ${tools.length} tools · ${data.trials_with_tools || 0}/${data.trials_counted || 0} trials`;
+    body.innerHTML = tools.map((t, i) => {
+      const pct = Math.max(2, ((t.count || 0) / max) * 100);
+      const share = total ? ((t.count || 0) * 100 / total).toFixed(1) : '0.0';
+      const color = COLORS[i % COLORS.length];
+      return `<div class="flex items-center gap-3 py-1">
+        <div class="w-44 shrink-0 truncate font-mono text-xs text-slate-200" title="${esc(t.name)}">${esc(t.name)}</div>
+        <div class="relative h-5 flex-1 rounded bg-slate-800/60 overflow-hidden">
+          <div class="h-full rounded" style="width:${pct}%;background:${color};opacity:.85"></div>
+        </div>
+        <div class="w-44 shrink-0 text-right text-xs text-slate-400 tabular-nums">${t.count} <span class="text-slate-600">·</span> ${share}% <span class="text-slate-600">·</span> ${t.trials || 0} trials</div>
+      </div>`;
+    }).join('');
+  }
+  function load() {
+    if (loaded) return;
+    loaded = true;
+    fetch(endpoint)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(render)
+      .catch(() => {
+        loaded = false;
+        body.innerHTML = '<p class="text-sm text-red-400">Failed to load tool distribution. Click to retry.</p>';
+      });
+  }
+  root.addEventListener('toggle', () => { if (root.open) load(); });
+  if (root.open) load();
 })();
 </script>
 {% endblock %}

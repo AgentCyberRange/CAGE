@@ -390,7 +390,7 @@ class TestHostRunServices(unittest.TestCase):
 
         svcs = ClaudeCodeAgent().host_run_services(
             _model(auth_source=self.auth_source),
-            http_proxy="http://10.1.2.146:7890",
+            http_proxy="http://192.0.2.10:7890",
         )
         self.assertEqual(len(svcs), 1)
         svc = svcs[0]
@@ -403,8 +403,8 @@ class TestHostRunServices(unittest.TestCase):
         self.assertEqual(svc.argv[svc.argv.index("--creds") + 1], self.cred_path)
         self.assertEqual(svc.argv[1], str(_OAUTH_REFRESH_SCRIPT))
         # Run's upstream proxy forwarded so it can reach the OAuth endpoint.
-        self.assertEqual(svc.env.get("HTTPS_PROXY"), "http://10.1.2.146:7890")
-        self.assertEqual(svc.env.get("https_proxy"), "http://10.1.2.146:7890")
+        self.assertEqual(svc.env.get("HTTPS_PROXY"), "http://192.0.2.10:7890")
+        self.assertEqual(svc.env.get("https_proxy"), "http://192.0.2.10:7890")
 
     def test_no_proxy_means_no_proxy_env(self) -> None:
         svc = ClaudeCodeAgent().host_run_services(

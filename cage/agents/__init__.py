@@ -8,6 +8,7 @@ def register_builtin_agents() -> None:
 
     import cage.agents.claude_code  # noqa: F401
     import cage.agents.codex  # noqa: F401
+    import cage.agents.gemini_cli  # noqa: F401
     import cage.agents.hermes  # noqa: F401
     import cage.agents.kimi_code  # noqa: F401
     import cage.agents.qwen_code  # noqa: F401

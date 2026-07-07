@@ -37,44 +37,37 @@ eval:
     # tree with scripts/build_cybergym_index.py from-data-dir.
     benchmark_root: ./datasets
     index_file: arvo.json
-    # External payloads + their grading-image cache (both materialised by the
-    # arvo-external run).
-    data_dir: /path/to/arvo/data
-    image_cache_dir: /path/to/arvo/image-cache
-    # --- Grading backend: image mode (default) vs binary mode ---------------
-    # Leave binary_dir UNSET to grade against the per-task n132/arvo images
-    # (uses image_cache_dir / image_cache below). SET binary_dir to grade
-    # against prebuilt vul/fix binaries instead (~130 GB on disk vs ~10 TB of
-    # images; a small pre-pulled cybergym/oss-fuzz-base-runner runs them). When
-    # set, image_cache_dir / image_cache are ignored. Agent task is identical.
-    # NOTE: the prebuilt-binary set only covers the CyberGym tasks (1368 arvo +
-    # 139 oss-fuzz), NOT the 3480-task arvo-external catalog — so most external
-    # tasks have no binaries and image mode is the right default here.
-    # binary_dir: ./datasets/server-binary
+    # External payloads (repo-vul.tar.gz etc.) staged into the agent container.
+    data_dir: ./datasets/payloads-arvo
+    # --- Grading backend: BINARY mode is the default (matches default_cybergym) -
+    # binary_dir set -> grade against the prebuilt vul/fix binaries extracted from
+    # the n132/arvo image tars (scripts/extract_server_binaries.py), run by a small
+    # pre-pulled cybergym/oss-fuzz-base-runner. Binaries exist only for the tasks
+    # that have been extracted, so task_ids below pins the run to that ready set.
+    binary_dir: ./datasets/server-binary-arvo
+    # Only tasks whose vul+fix binaries AND payload are present (regenerate as the
+    # extraction proceeds — see the recipe in any local arvo yaml). Omit to run the
+    # full catalog (image mode only). Override per-run with --task-ids / --sample.
+    task_ids: ./datasets/arvo_binary_ready.txt
+    # To use IMAGE mode instead (per-task n132/arvo:<id>-<mode> images, full 3480
+    # catalog), comment out binary_dir + task_ids above and uncomment these:
+    # image_cache_dir: ./datasets/image-cache
     # level0 repo only · level1 +description · level2 +crash trace · level3 +patch.
     difficulty: level1
-    # The whole 3480-task catalog runs by default (images are cached for them).
-    # Subset from the CLI with `--sample arvo_10012 ...` or cap with eval.limit.
+    # White-box debug toggles exactly as in cybergym: `--dynamic-sandbox true`
+    # (or --set eval.benchmark.dynamic_sandbox=true) stages the prebuilt target +
+    # uses the debug image. Subset further with `--sample arvo_10012 ...`.
     grading:
       enabled: true
-    image_cache:
-      # Keep the CyberGym benchmark "first 100" permanently loaded even during
-      # arvo runs — these are never evicted.
-      pinned_task_ids: ./datasets/cybergym_images.txt
-      # The 3480 external tasks are huge (8.4TB of tars). Load on demand and
-      # LRU-evict so docker's filesystem stays under this budget. Tune to taste.
-      max_evictable_gb: 500
-      evict: true
-      # Storage-safety floor (GB). Before loading any grading image we ensure at
-      # least this much free space on the docker filesystem; if a load would
-      # breach it we evict non-pinned images first, and abort the run if free
-      # space still cannot be raised above the floor. Prevents the disk-full
-      # corruption that bricks images. Resolution is offline only: local docker
-      # -> local tar cache -> fail (never a registry pull).
-      min_free_gb: 50
-      # Warm a trial's grading images in the background at trial start so the
-      # multi-GB docker load is hidden behind the agent's runtime.
-      preload: true
+    # IMAGE MODE ONLY (ignored while binary_dir is set above). Uncomment together
+    # with image_cache_dir to grade the full 3480-task catalog against per-task
+    # n132/arvo images with on-demand load + LRU eviction:
+    # image_cache:
+    #   pinned_task_ids: ./datasets/cybergym_images.txt   # never evicted
+    #   max_evictable_gb: 500
+    #   evict: true
+    #   min_free_gb: 50      # storage-safety floor; offline resolution only
+    #   preload: true        # warm a trial's image in the background at start
   limit: null
 
 target:
@@ -104,6 +97,11 @@ agents:
           DISABLE_INTERLEAVED_THINKING: "1"
     image: pursu1ng/cage-images:claude-code-latest
     home: /home/agent/workspace
+    # submit.sh blocks on synchronous host-side grading (~150s). Claude Code's
+    # Bash tool would otherwise kill the curl at 120s; outwait the grading ceiling.
+    extra_env:
+      BASH_DEFAULT_TIMEOUT_MS: "600000"
+      BASH_MAX_TIMEOUT_MS: "600000"
     # Concurrency: how many trials this agent runs AT ONCE (not a total cap).
     # Override at the CLI with --max-concurrent N.
     max_concurrent: 3

@@ -43,6 +43,7 @@ from typing import Any
 import yaml
 
 from cage.agents.base import AgentInstance, get_agent_type
+from cage.agents.custom import load_custom_agent
 from cage.benchmarks import parse_sample_slice
 from cage.benchmarks.loader import load_benchmark_from_module
 from cage.config import find_repo_root, resolve_models_file
@@ -213,16 +214,31 @@ def _resolve_benchmark(
 
 
 def _resolve_agents(
-    raw: dict[str, Any], models: dict[str, ModelConfig], models_file: Any
+    raw: dict[str, Any],
+    models: dict[str, ModelConfig],
+    models_file: Any,
+    base_dir: Path,
 ) -> list[AgentInstance]:
-    """Build the agent instances (expanding ``models``/``subjects`` matrices)."""
+    """Build the agent instances (expanding ``models``/``subjects`` matrices).
+
+    An agent entry with a ``source:`` is a *custom agent* — a self-contained
+    directory holding the agent's code plus an ``agent.yml`` manifest. We load
+    that manifest into a :class:`CustomAgent` carrying its own source path /
+    launch command / env, instead of looking up a built-in by ``kind``. The
+    manifest's host paths resolve relative to ``base_dir`` (the experiment
+    file's directory), like ``eval.benchmark.module``.
+    """
     agent_cfgs = raw.get("agents", [])
     subjects = raw.get("subjects", [])
 
     agents: list[AgentInstance] = []
     for acfg in agent_cfgs:
-        kind = acfg.get("kind", acfg.get("agent_type", ""))
-        at = get_agent_type(kind)
+        source = acfg.get("source")
+        if source:
+            at = load_custom_agent(source, base_dir, acfg.get("params"))
+        else:
+            kind = acfg.get("kind", acfg.get("agent_type", ""))
+            at = get_agent_type(kind)
 
         # Determine which model(s) this agent uses
         # ``agents[].models`` is the benchmark-friendly form: one logical
@@ -517,7 +533,7 @@ def resolve(
     judge = _resolve_judge(raw, models, models_file)
     proxy = _resolve_proxy(raw, spec)
     benchmark, benchmark_dir, sample_limit, sample_slice = _resolve_benchmark(raw, base_dir)
-    agents = _resolve_agents(raw, models, models_file)
+    agents = _resolve_agents(raw, models, models_file, base_dir)
     hooks = load_hooks(raw.get("hooks", {}))
     execution = _resolve_execution(raw, spec)
     logging_config = _resolve_logging(raw)

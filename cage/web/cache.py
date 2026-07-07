@@ -133,6 +133,24 @@ def get_or_compute(
 # anyone has scrolled through in a single inspector session.
 run_summary_cache = SignatureCache(max_size=256)
 
+# Run-level projection caches for runs that never persisted a projection file
+# (live, crashed, or abandoned). Both the run-history reconstruction and the
+# stub dashboard otherwise re-walk every trial (+ resume archive) on disk on
+# *every* page load — the dominant cost of opening a large run's detail page on
+# NAS-backed storage. Keyed on the cheap structural run signature, so a settled
+# run is served from cache and a live run only recomputes when a trial dir is
+# added or a resume happens, not on each navigation. 256 distinct runs per
+# session is well past what anyone scrolls through.
+run_history_cache = SignatureCache(max_size=256)
+stub_dashboard_cache = SignatureCache(max_size=256)
+
+# Aggregate tool-call distribution per run. Reads each trial's already-persisted
+# tool counts (proxy/progress.json), falling back to a full proxy.jsonl parse
+# only for legacy runs. Served async (never on the critical detail-page render)
+# and cached on the same cheap structural signature: a settled run is computed
+# once, a live run recomputes only when a trial is added or resumed.
+run_tools_cache = SignatureCache(max_size=256)
+
 # Per-trial summary cache. 4096 trials covers a 13-run × 320-trial
 # binge without eviction. Each entry is ~1 KB of parsed JSON.
 trial_summary_cache = SignatureCache(max_size=4096)

@@ -221,6 +221,20 @@ class Benchmark(ABC):
     def scorer(self) -> Scorer:
         """Return the default scorer applied to every trial."""
 
+    def container_image_override(self) -> str | None:
+        """Optional Docker image this benchmark requires for the agent container.
+
+        Returns ``None`` (default) to use the agent's configured image. A
+        benchmark that needs a specific runtime — e.g. a white-box debug image
+        whose ABI matches a binary it stages into the workspace — returns the
+        image ref here, and the orchestrator uses it instead of the agent's
+        default. Layer 1 stays benchmark-agnostic: the concrete image name comes
+        from the benchmark/config, never from ``cage/``. This lets a single
+        benchmark knob (e.g. a debug flag) swap both the workspace contents and
+        the runtime image, so users flip one parameter instead of two.
+        """
+        return None
+
     def reward(self, result: "TrialResult") -> float:
         """Scalar RL reward in ``[0, 1]`` for one finished trial.
 

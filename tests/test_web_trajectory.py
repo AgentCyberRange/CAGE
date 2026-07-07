@@ -144,6 +144,8 @@ def test_parse_trajectory_includes_operator_summary(tmp_path: Path) -> None:
         "total_steps_known": True,
         "total_tokens": {"in": 60, "out": 12, "reasoning": 0},
         "top_tools": [{"name": "bash", "count": 2}, {"name": "python", "count": 1}],
+        "tools": [{"name": "bash", "count": 2}, {"name": "python", "count": 1}],
+        "tool_calls": 3,
         "last_action": "tool: bash",
         "error_count": 1,
     }

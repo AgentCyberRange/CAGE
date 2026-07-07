@@ -561,6 +561,42 @@ class Container:
         """Send a signal to a process in the container."""
         self.exec(f"kill -s {signal} {pid} 2>/dev/null || true", timeout=5.0)
 
+    def kill_agent(self, *, user: str = "agent", spare_pattern: str = "sidecar.py") -> None:
+        """Force-kill the agent process tree inside the container.
+
+        The agent is launched via :meth:`exec_async` as the unprivileged
+        ``agent`` user. Killing the host-side ``docker exec`` *client* (the
+        ``Popen`` returned by ``exec_async``) does **not** stop it: Docker does
+        not forward the client's death into the container, so the agent keeps
+        running — still issuing model calls — and the host-side
+        ``proc.communicate()`` blocks on the exec stdout pipe the agent's
+        children keep open. Every in-band termination (wall-clock timeout,
+        ``max_rounds``/token/cost budget, live-check success) needs to actually
+        reach into the container; this is that hammer.
+
+        We SIGKILL every ``user`` process **except** the proxy sidecar (which
+        runs as the same user and must outlive the agent to flush its request
+        log — matched by ``spare_pattern`` in ``/proc/<pid>/cmdline``). This
+        runs as the container's default (root) user so it can signal the
+        unprivileged agent, targets the per-trial container's own PID namespace
+        (each trial gets its own container, so this never touches another
+        trial), and once the agent tree dies the exec pipe EOFs and the
+        host-side drain returns promptly.
+        """
+        if not self._started:
+            return
+        # POSIX sh loop: list the user's PIDs, skip the sidecar, SIGKILL the rest.
+        script = (
+            f"for p in $(pgrep -u {shlex.quote(user)} 2>/dev/null); do "
+            f"grep -qa {shlex.quote(spare_pattern)} \"/proc/$p/cmdline\" 2>/dev/null "
+            f"|| kill -KILL \"$p\" 2>/dev/null; "
+            f"done; true"
+        )
+        try:
+            self.exec(script, timeout=10.0)
+        except Exception as exc:  # noqa: BLE001 - best-effort reaper; never raise
+            logger.warning("kill_agent failed for %s: %s", self.name, exc)
+
     def exec_async(
         self,
         command: str,

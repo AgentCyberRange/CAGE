@@ -53,8 +53,14 @@ class _ProxyMonitor:
         poll_interval: float = 10.0,
         process: Any | None = None,
         max_rounds: int = -1,
+        max_output_tokens: int | None = None,
+        max_input_tokens: int | None = None,
+        max_cost: float | None = None,
     ) -> None:
-        del container, log_dir
+        del log_dir
+        # Keep the container: an in-band cap breach must reap the agent INSIDE
+        # the container (the sidecar can only 429, it cannot kill the agent).
+        self.container = container
         self.trial_id = trial_id
         self.artifact_dir = artifact_dir
         self.reporter = reporter
@@ -62,7 +68,12 @@ class _ProxyMonitor:
         self.poll_interval = poll_interval
         self.process = process
         self.max_rounds = max_rounds
+        self.max_output_tokens = max_output_tokens
+        self.max_input_tokens = max_input_tokens
+        self.max_cost = max_cost
         self.terminated_by_max_rounds = False
+        self.terminated_by_limit = False
+        self.termination_reason = ""
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_count = 0
@@ -103,7 +114,7 @@ class _ProxyMonitor:
         except (TypeError, ValueError):
             return
         self._emit_reporter_progress(progress)
-        self._maybe_stop_on_max_rounds(progress)
+        self._maybe_enforce_limits(progress)
         if count == self._last_count:
             return
         new_requests = count - self._last_count
@@ -121,10 +132,23 @@ class _ProxyMonitor:
             int(progress.get("errors", 0) or 0),
         )
 
-    def _maybe_stop_on_max_rounds(self, progress: dict[str, Any]) -> None:
-        if self.terminated_by_max_rounds:
+    def _maybe_enforce_limits(self, progress: dict[str, Any]) -> None:
+        """Host-side reaper for every proxy-observable stop condition.
+
+        The in-container sidecar already 429s once a round/token/cost cap is
+        hit, but it has no handle on the agent and cannot kill it — a stubborn
+        agent that keeps retrying on 429 would run forever (this is exactly how
+        ``max_output_tokens`` trials leaked into multi-hour zombies). So the
+        host watches the same cumulative counters the sidecar writes to
+        ``progress.json`` and force-kills the agent tree the instant any cap is
+        reached. The trial-end classifier (``termination.py``) still derives the
+        precise ``status_reason`` from cumulative usage; this only stops the
+        bleeding. The wall-clock timeout is enforced separately by the trial
+        runner's ``communicate(timeout=...)``.
+        """
+        if self.terminated_by_max_rounds or self.terminated_by_limit:
             return
-        if self.process is None or self.max_rounds <= 0:
+        if self.process is None:
             return
         rounds = _progress_int(
             progress,
@@ -135,18 +159,36 @@ class _ProxyMonitor:
                 fallback=_progress_int(progress, "total_requests"),
             ),
         )
-        if rounds < self.max_rounds:
+        tokens_out = _progress_int(progress, "tokens_out")
+        tokens_in = _progress_int(progress, "tokens_in")
+        cost = _progress_float(progress.get("cost_usd"))
+
+        reason = ""
+        is_rounds = False
+        if self.max_rounds > 0 and rounds >= self.max_rounds:
+            reason = f"max_rounds reached ({rounds}/{self.max_rounds})"
+            is_rounds = True
+        elif self.max_output_tokens and tokens_out >= self.max_output_tokens:
+            reason = f"max_output_tokens reached ({tokens_out}/{self.max_output_tokens})"
+        elif self.max_input_tokens and tokens_in >= self.max_input_tokens:
+            reason = f"max_input_tokens reached ({tokens_in}/{self.max_input_tokens})"
+        elif self.max_cost is not None and cost is not None and cost >= self.max_cost:
+            reason = f"max_cost reached ({cost:.4f}/{self.max_cost})"
+        if not reason:
             return
         if not _process_is_running(self.process):
             return
-        self.terminated_by_max_rounds = True
+        # terminated_by_max_rounds is read by the trial runner; the generic
+        # terminated_by_limit covers token/cost caps.
+        if is_rounds:
+            self.terminated_by_max_rounds = True
+        else:
+            self.terminated_by_limit = True
+        self.termination_reason = reason
         logger.info(
-            "  [proxy] trial=%s max_rounds reached (%d/%d), terminating agent",
-            self.trial_id,
-            rounds,
-            self.max_rounds,
+            "  [proxy] trial=%s %s, terminating agent", self.trial_id, reason
         )
-        _terminate_process(self.process)
+        _terminate_process(self.process, self.container)
 
     def _emit_reporter_progress(self, progress: dict[str, Any]) -> None:
         if self.reporter is None:
@@ -222,8 +264,19 @@ def _process_is_running(process: Any) -> bool:
         return True
     return True
 
-def _terminate_process(process: Any) -> None:
-    """Best-effort termination for an async agent process."""
+def _terminate_process(process: Any, container: Any | None = None) -> None:
+    """Best-effort termination for an async agent process.
+
+    The agent runs via ``docker exec``; terminating the host-side client does
+    NOT stop the in-container agent. When the container is known we reap the
+    agent tree inside it (``kill_agent``) — which also EOFs the exec pipe so the
+    host-side drain returns — and keep the client ``terminate()`` as cleanup.
+    """
+    if container is not None:
+        try:
+            container.kill_agent()
+        except Exception:
+            pass
     if not _process_is_running(process):
         return
     try:
@@ -233,6 +286,7 @@ def _terminate_process(process: Any) -> None:
 
 def _start_live_success_stop_thread(
     process: Any,
+    container: Any,
     monitors: list[tuple[Any, bool]],
 ) -> tuple[threading.Event, threading.Thread | None]:
     """Terminate the agent process when a live-success monitor asks us to stop."""
@@ -245,7 +299,7 @@ def _start_live_success_stop_thread(
             for event, should_stop in monitors:
                 if event.is_set():
                     if should_stop:
-                        _terminate_process(process)
+                        _terminate_process(process, container)
                     return
             stop_event.wait(0.2)
 
@@ -258,7 +312,8 @@ def _parse_proxy_stats(proxy_log_path: Path | None) -> dict[str, Any]:
 
     Returns a dict with:
       - input_tokens, output_tokens, reasoning_tokens (totals)
-      - num_requests (successful upstream calls)
+      - num_requests (successful upstream calls = agent rounds shown as "steps")
+      - total_requests (every record incl. failures), errors (failed attempts)
       - reasoning_content (concatenated thinking from all requests)
     """
     stats: dict[str, Any] = {
@@ -266,6 +321,8 @@ def _parse_proxy_stats(proxy_log_path: Path | None) -> dict[str, Any]:
         "output_tokens": 0,
         "reasoning_tokens": 0,
         "num_requests": 0,
+        "total_requests": 0,
+        "errors": 0,
         "reasoning_content": "",
     }
     if not proxy_log_path or not proxy_log_path.exists():
@@ -282,7 +339,9 @@ def _parse_proxy_stats(proxy_log_path: Path | None) -> dict[str, Any]:
             entry = json_mod.loads(line)
         except json_mod.JSONDecodeError:
             continue
+        stats["total_requests"] += 1
         if entry.get("status") != "success":
+            stats["errors"] += 1
             continue
 
         usage = extract_entry_usage(entry)

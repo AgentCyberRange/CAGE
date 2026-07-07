@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import secrets
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -41,14 +43,18 @@ from cage.gc.summary import summarize_resource_ledger
 
 from .cache import (
     dashboard_projection_is_stale,
+    get_or_compute,
     run_has_live_activity,
     safe_mtime_ns,
+    stub_dashboard_cache,
 )
 from .data import (
     _format_file_size,
     _iter_cage_runs_dirs,
+    aggregate_run_tool_counts,
     build_trial_file_tree,
     build_trial_termination,
+    enrich_canonical_trial_rows,
     find_trial_dirs,
     group_runs,
     is_indexed_trial_artifact_path,
@@ -66,6 +72,7 @@ from .data import (
     load_trial_step_context,
     load_trial_summary,
     load_trial_summary_cached,
+    ordered_canonical_trial_refs,
     parse_trial_trajectory,
     pending_trial_summary,
     planned_trial_dir,
@@ -80,6 +87,21 @@ from .data import (
 from .delta import build_run_trials_delta, build_runs_delta, relative_to_root
 
 inspector_bp = Blueprint("inspector", __name__)
+
+
+@inspector_bp.after_app_request
+def _no_store_html(resp):
+    # The inspector is actively developed; never let a browser serve a stale page
+    # document (its inline JS drives all client-side rendering). HTML responses get
+    # no-store so a plain reload always picks up template/JS changes. (Static assets
+    # and JSON are unaffected — they're versioned/AJAX and safe to cache briefly.)
+    try:
+        if (resp.mimetype or "").startswith("text/html"):
+            resp.headers["Cache-Control"] = "no-store, must-revalidate"
+            resp.headers["Pragma"] = "no-cache"
+    except Exception:
+        pass
+    return resp
 
 
 @inspector_bp.before_app_request
@@ -629,6 +651,41 @@ def _settled_trial_rows(
     return _sort_trials_for_display(rows)
 
 
+# Bounded so a big run can't spawn a thousand threads; well above the point
+# where NAS read latency stops being the bottleneck. Overridable for tuning.
+_TRIAL_SCAN_WORKERS = max(4, int(os.environ.get("CAGE_INSPECT_TRIAL_WORKERS", "16") or "16"))
+
+
+def _load_trial_summaries_concurrent(
+    pending: list[tuple[Path, str, dict[str, Any]]],
+    run_status: str,
+) -> list[tuple[Path, str, dict[str, Any]]]:
+    """Load per-trial summaries concurrently, preserving input order.
+
+    Each :func:`load_trial_summary_cached` call is independent and latency-bound
+    on networked storage; loading them on a small thread pool collapses a serial
+    per-trial NAS walk to roughly its slowest single read. The per-trial cache it
+    writes through is lock-guarded, so concurrent population is safe and also
+    warms the cache for the next poll. Returns ``(trial_dir, trial_id, info)``
+    tuples in the same order as ``pending``.
+    """
+    if not pending:
+        return []
+
+    def _load(item: tuple[Path, str, dict[str, Any]]) -> tuple[Path, str, dict[str, Any]]:
+        trial_dir, trial_id, seed = item
+        info = load_trial_summary_cached(trial_dir, seed, run_status=run_status)
+        return (trial_dir, trial_id, info)
+
+    if len(pending) == 1:
+        return [_load(pending[0])]
+    workers = min(_TRIAL_SCAN_WORKERS, len(pending))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        # executor.map preserves input order, which the caller relies on for
+        # stable sort_index assignment.
+        return list(pool.map(_load, pending))
+
+
 def _trial_rows_for_run(
     run_dir: Path,
     dashboard: dict[str, Any],
@@ -677,6 +734,7 @@ def _trial_rows_for_run(
                 "sort_index": len(rows),
             })
             seen.add(trial_id)
+    pending: list[tuple[Path, str, dict[str, Any]]] = []
     for trial_dir in find_trial_dirs(run_dir):
         trial_id = _trial_display_id(trial_dir, run_dir)
         if trial_id in seen:
@@ -685,14 +743,22 @@ def _trial_rows_for_run(
             **planned_map.get(trial_id, {}),
             **trial_map.get(trial_id, {}),
         }
-        info = load_trial_summary_cached(trial_dir, seed, run_status=run_status)
+        pending.append((trial_dir, trial_id, seed))
+        seen.add(trial_id)
+    # Each per-trial summary is an independent batch of small NAS reads
+    # (meta.json/task_output/progress/scores), so on networked storage the walk
+    # is latency-bound and parallelizes near-linearly. Results are slotted back
+    # in discovery order, so the rendered order is identical to a serial walk.
+    base = len(rows)
+    for offset, (trial_dir, trial_id, info) in enumerate(
+        _load_trial_summaries_concurrent(pending, run_status)
+    ):
         rows.append({
             "dir": trial_dir,
             "info": info,
             "id": trial_id,
-            "sort_index": len(rows),
+            "sort_index": base + offset,
         })
-        seen.add(trial_id)
     for item in planned:
         trial_id = str(item.get("trial_id") or "")
         if not trial_id or trial_id in seen:
@@ -1395,15 +1461,25 @@ def _build_run_overview(
     dashboard: dict[str, Any],
     trials: list[dict[str, Any]],
     run_history: list[dict[str, Any]],
+    *,
+    counts_override: dict[str, int] | None = None,
+    ids_override: list[str] | None = None,
 ) -> dict[str, Any]:
-    counts = _aggregate_agent_counts(t["info"] for t in trials)
+    # In paginated mode only the first page of ``trials`` is materialized, so the
+    # whole-run aggregates (counts, id span, total) are passed in from the cheap
+    # run-level record instead of derived from the partial page.
+    counts = counts_override or _aggregate_agent_counts(t["info"] for t in trials)
     has_running = counts.get("running", 0) > 0
-    ids = [str(t.get("id") or "") for t in trials]
+    ids = ids_override if ids_override is not None else [str(t.get("id") or "") for t in trials]
+    trial_total = len(ids)
     sample_ids = sorted({
         str(t["info"].get("sample_id") or "")
         for t in trials
         if t["info"].get("sample_id")
     })
+    # In paginated mode ``sample_ids`` only covers the first page, so the
+    # whole-run sample count falls back to the (complete) id span.
+    sample_count = trial_total if ids_override is not None else (len(sample_ids) or trial_total)
     status_labels = sorted({
         str(t["info"].get("status_label") or "")
         for t in trials
@@ -1457,11 +1533,11 @@ def _build_run_overview(
             agent_label,
             sample_ids,
             ids,
-            len(trials),
+            trial_total,
         ),
         "trial_scope": {
-            "total": len(trials),
-            "samples": len(sample_ids) or len(ids),
+            "total": trial_total,
+            "samples": sample_count,
             "first": ids[0] if ids else "",
             "last": ids[-1] if ids else "",
         },
@@ -2085,16 +2161,49 @@ def _stub_dashboard(run_dir: Path) -> dict[str, Any]:
     ``ExperimentRecord`` even when legacy ``planned_trials.json`` is gone.
     The trials list is left empty; the page reads per-trial state from the
     filesystem and canonical record refs.
-    """
 
+    The build loads the ``ExperimentRecord`` snapshot, which is multi-second
+    on a large run over NAS — and it runs on every detail-page load. Cache it
+    on the mtimes of exactly the three files the build reads, so repeat
+    navigations are free while still recomputing the moment the orchestrator
+    rewrites the record (which it does as trials complete).
+    """
+    signature = (
+        safe_mtime_ns(run_dir / "config.yaml"),
+        safe_mtime_ns(run_dir / "planned_trials.json"),
+        safe_mtime_ns(run_dir / "experiment_record.json"),
+    )
+    return get_or_compute(
+        stub_dashboard_cache,
+        run_dir,
+        signature,
+        lambda: _build_stub_dashboard(run_dir),
+    )
+
+
+def _build_stub_dashboard(run_dir: Path) -> dict[str, Any]:
     config_path = run_dir / "config.yaml"
     planned_path = run_dir / "planned_trials.json"
     record_path = run_dir / "experiment_record.json"
-    snapshot = (
-        ExperimentArtifactReader(run_dir).try_load_snapshot()
-        if record_path.exists()
-        else None
-    )
+    # Read only the run-level record (and the spec's experiment id) — never the
+    # full snapshot. ``load_snapshot`` eagerly resolves every trial record and
+    # every trial's events plus the artifact index (thousands of NAS reads on a
+    # large run); the stub only needs the record's aggregate trial counts and a
+    # couple of scalar fields. ``load_record``/``load_spec`` are single-file
+    # reads, turning a multi-second build into milliseconds.
+    record = None
+    experiment_id = ""
+    if record_path.exists():
+        reader = ExperimentArtifactReader(run_dir)
+        try:
+            record = reader.load_record()
+        except Exception:
+            record = None
+        if record is not None:
+            try:
+                experiment_id = reader.load_spec().identity.experiment_id
+            except Exception:
+                experiment_id = ""
     if (
         not config_path.exists()
         and not planned_path.exists()
@@ -2103,30 +2212,26 @@ def _stub_dashboard(run_dir: Path) -> dict[str, Any]:
         return {}
     agent_label = run_dir.parent.name
     agents: dict[str, Any] = {}
-    if snapshot is not None:
+    if record is not None:
         agents[agent_label] = {
-            "total": snapshot.record.trials.total,
-            "completed": snapshot.record.trials.completed,
-            "failed": snapshot.record.trials.failed,
-            "interrupted": snapshot.record.trials.interrupted,
+            "total": record.trials.total,
+            "completed": record.trials.completed,
+            "failed": record.trials.failed,
+            "interrupted": record.trials.interrupted,
             "running": max(
                 0,
-                snapshot.record.trials.total
-                - snapshot.record.trials.completed
-                - snapshot.record.trials.failed
-                - snapshot.record.trials.interrupted,
+                record.trials.total
+                - record.trials.completed
+                - record.trials.failed
+                - record.trials.interrupted,
             ),
         }
     return {
-        "run_id": snapshot.record.run_id if snapshot is not None else run_dir.name,
-        "experiment": (
-            snapshot.spec.identity.experiment_id
-            if snapshot is not None
-            else ""
-        ),
-        "started_at": snapshot.record.started_at if snapshot is not None else "",
-        "completed_at": snapshot.record.completed_at if snapshot is not None else "",
-        "status": snapshot.record.status if snapshot is not None else "running",
+        "run_id": record.run_id if record is not None else run_dir.name,
+        "experiment": experiment_id,
+        "started_at": record.started_at if record is not None else "",
+        "completed_at": record.completed_at if record is not None else "",
+        "status": record.status if record is not None else "running",
         "agents": agents,
     }
 
@@ -2439,6 +2544,40 @@ def benchmark_detail(project: str):
     )
 
 
+def _record_counts_from_dashboard(dashboard: dict[str, Any], total: int) -> dict[str, int]:
+    """Whole-run header counts from the run-level record, no per-trial walk.
+
+    Used in paginated mode where only the first page of rows is materialized.
+    The record gives total/completed/failed/running directly; the finer
+    web-classifier buckets (live_success/warnings) can't be known without
+    reading every trial, so they fold into ``other`` — the per-row badges still
+    show the exact status once a row scrolls into view.
+    """
+    completed = failed = running = 0
+    for agent_data in dashboard.get("agents", {}).values():
+        if not isinstance(agent_data, dict):
+            continue
+        completed += int_or_zero(agent_data.get("completed"))
+        failed += int_or_zero(agent_data.get("failed"))
+        running += int_or_zero(agent_data.get("running"))
+    other = max(0, total - completed - failed - running)
+    return {
+        "total": total,
+        "running": running,
+        "completed": completed,
+        "live_success": 0,
+        "warnings": 0,
+        "failed": failed,
+        "other": other,
+    }
+
+
+# Rows rendered server-side on first paint for a large run. The rest stream in
+# on scroll via /api/run/<encoded>/rows, so the initial page stays small and
+# fast regardless of trial count. Overridable for tuning.
+_RUN_PAGE_SIZE = max(20, int(os.environ.get("CAGE_INSPECT_RUN_PAGE_SIZE", "80") or "80"))
+
+
 def _render_run_detail(run_dir: Path):
     # Live runs may not yet have dashboard.json — fall back to a
     # minimal stub built from planned_trials.json so the page can
@@ -2447,6 +2586,48 @@ def _render_run_detail(run_dir: Path):
     if not dashboard:
         abort(404)
     run_history = load_run_history(run_dir, dashboard=dashboard)
+
+    # Paginate a large canonical run that the settled fast path does NOT cover
+    # (live, resumed, or dashboard-less). Such a run otherwise builds and renders
+    # every trial row on first paint — seconds of work for thousands of trials.
+    # Instead render the first page from a cheap run-level index and stream the
+    # rest on scroll. Settled runs keep the existing full render (their rows come
+    # from the cheap dashboard projection already).
+    settled_fast = bool(
+        dashboard.get("completed_at")
+        and _trial_map_from_dashboard(dashboard)
+        and not dashboard_projection_is_stale(run_dir)
+    )
+    refs = None if settled_fast else ordered_canonical_trial_refs(run_dir)
+    pagination: dict[str, Any] | None = None
+
+    if refs is not None and len(refs) > _RUN_PAGE_SIZE:
+        all_ids = [r["id"] for r in refs]
+        trials_with_paths = enrich_canonical_trial_rows(run_dir, refs[:_RUN_PAGE_SIZE])
+        _demote_stale_running_rows(trials_with_paths, run_dir)
+        counts = _record_counts_from_dashboard(dashboard, len(refs))
+        for agent_data in dashboard.get("agents", {}).values():
+            if isinstance(agent_data, dict):
+                agent_data.update(counts)
+        has_running = counts.get("running", 0) > 0
+        run_overview = _build_run_overview(
+            run_dir, dashboard, trials_with_paths, run_history,
+            counts_override=counts, ids_override=all_ids,
+        )
+        # Warnings/live-success can't be detected without a full walk; the live
+        # signal (running) is the affordance that matters for an in-flight run.
+        has_review_work = has_running
+        pagination = {
+            "encoded": encode_path(run_dir),
+            "total": len(refs),
+            "loaded": len(trials_with_paths),
+            "page_size": _RUN_PAGE_SIZE,
+        }
+        return _render_run_template(
+            run_dir, dashboard, trials_with_paths, run_history,
+            has_running, has_review_work, run_overview, pagination,
+        )
+
     trials_with_paths = _trial_rows_for_run(run_dir, dashboard)
     # Recompute the per-agent header counts from the actual on-disk
     # trial files we just classified, instead of trusting the
@@ -2465,6 +2646,22 @@ def _render_run_detail(run_dir: Path):
         or str(t["info"].get("status_kind") or "") in {"warning", "live_success"}
         for t in trials_with_paths
     )
+    return _render_run_template(
+        run_dir, dashboard, trials_with_paths, run_history,
+        has_running, has_review_work, run_overview, pagination,
+    )
+
+
+def _render_run_template(
+    run_dir: Path,
+    dashboard: dict[str, Any],
+    trials_with_paths: list[dict[str, Any]],
+    run_history: list[dict[str, Any]],
+    has_running: bool,
+    has_review_work: bool,
+    run_overview: dict[str, Any],
+    pagination: dict[str, Any] | None,
+):
     trial_tag_options = sorted({
         tag
         for trial in trials_with_paths
@@ -2495,6 +2692,7 @@ def _render_run_detail(run_dir: Path):
         run_history=run_history,
         project=project,
         model=model,
+        pagination=pagination,
     )
 
 
@@ -2711,11 +2909,35 @@ def _render_trial_detail(trial_dir: Path):
         for metric, payload in score_details.items()
     }
     token_context = _trial_token_context(run_dir, trial_dir, usage, dashboard=dashboard)
+    # Cairn agent trials get a graph panel: the subject label is
+    # ``cairn:<model>:<mode>``. One same-origin URL serves the graph for *any*
+    # cairn trial -- it reverse-proxies the running container's live Cairn UI,
+    # or, once the trial ends, statically renders the ``cairn_graph.yaml``
+    # snapshot through Cairn's own frontend. The URL deep-links straight to the
+    # single project's graph (``#/projects/proj_001``) so the button lands on
+    # the graph, not Cairn's project list.
+    is_cairn = bool(run_dir) and run_dir.parent.name.startswith("cairn:")
+    cairn_graph_url = ""
+    if is_cairn:
+        # Open Cairn's OWN frontend (the gallery for this run) deep-linked to
+        # this trial's project. The gallery shows every trial of the run as an
+        # isolated project; the 3 MB frontend loads once, then browsing is
+        # client-side. ``canonical`` = ``/<benchmark>/<model>/<run>/<trial_rel>``.
+        canonical = _trial_url_for(trial_dir, run_dir)
+        if canonical.startswith("/") and not canonical.startswith("/trial/"):
+            parts = canonical.strip("/").split("/")
+            run_base = "/".join(parts[:3])           # benchmark/model/run_id
+            slug = _cairn_slug("/".join(parts[3:]))  # trial_rel -> hash-safe id
+            cairn_graph_url = f"/cairn-gallery/{run_base}/#/projects/{slug}"
+    cairn_graph_snapshot = is_cairn and _cairn_snapshot_path(trial_dir).is_file()
     return render_template(
         "trial.html",
         trial=trial,
         trial_dir=trial_dir,
         trial_status=trial_status,
+        is_cairn=is_cairn,
+        cairn_graph_url=cairn_graph_url,
+        cairn_graph_snapshot=cairn_graph_snapshot,
         termination=termination,
         trial_diagnosis=trial_diagnosis,
         trial_outcome=trial_outcome,
@@ -3058,6 +3280,438 @@ def api_run_trials(encoded: str):
         since_ms=since_ms,
         trial_url=lambda trial_dir: _trial_url_for(trial_dir, run_dir),
     ))
+
+
+@inspector_bp.route("/api/run/<encoded>/rows")
+def api_run_rows(encoded: str):
+    """Server-rendered trial rows for a slice of a paginated run detail page.
+
+    The detail page renders only the first page on first paint; this streams the
+    remaining rows on scroll. Returns the same ``_trial_rows.html`` fragment the
+    page uses (no client-side row templating) plus the cursor for the next page.
+    Only the requested slice's per-trial records are read, so each page is cheap
+    regardless of run size.
+    """
+    run_dir = _decode_path(encoded)
+    refs = ordered_canonical_trial_refs(run_dir)
+    if refs is None:
+        abort(404)
+    offset = max(0, request.args.get("offset", 0, type=int) or 0)
+    limit = request.args.get("limit", _RUN_PAGE_SIZE, type=int) or _RUN_PAGE_SIZE
+    limit = max(1, min(limit, 500))
+    page_refs = refs[offset:offset + limit]
+    rows = enrich_canonical_trial_rows(run_dir, page_refs)
+    _demote_stale_running_rows(rows, run_dir)
+    html = render_template(
+        "_trial_rows.html",
+        trials=rows,
+        run_dir=run_dir,
+        row_number_offset=offset,
+    )
+    next_offset = offset + len(rows)
+    return jsonify({
+        "html": html,
+        "offset": offset,
+        "loaded": len(rows),
+        "next_offset": next_offset,
+        "total": len(refs),
+        "has_more": next_offset < len(refs),
+    })
+
+
+@inspector_bp.route("/api/run/<encoded>/tools")
+def api_run_tools(encoded: str):
+    """Aggregate tool-call distribution across all trials in a run.
+
+    Reads each trial's already-persisted ``proxy/progress.json`` tool counts
+    (legacy runs fall back to a ``proxy.jsonl`` parse), cached in-process and in
+    an on-disk sidecar. The run detail page still fetches it asynchronously
+    after first paint so a cold/legacy run never blocks the critical render.
+    """
+    run_dir = _decode_path(encoded)
+    if not run_dir.is_dir():
+        abort(404)
+    return jsonify(aggregate_run_tool_counts(run_dir))
+
+
+# Resolving a trial's live container means a docker ps + inspect, which is slow
+# on a busy host (tens of agent containers). Cache per trial for a few seconds:
+# a running container's IP is stable, and this collapses the ~10 asset/poll
+# requests a single page load fires into one docker round-trip.
+_CAIRN_IP_CACHE: dict[str, tuple[str | None, float]] = {}
+_CAIRN_IP_TTL_S = 8.0
+
+
+def _cairn_container_ip(trial_dir: Path) -> str | None:
+    """IP of the running Cairn agent container for ``trial_dir``, or None.
+
+    Maps trial -> container via the per-trial proxy bind-mount
+    (``Source == <trial_dir>/proxy``), so it is concurrency-safe across trials
+    (each trial has its own proxy dir, hence its own container). Cached briefly.
+    """
+    want = os.path.realpath(str(trial_dir / "proxy"))
+    now = time.time()
+    cached = _CAIRN_IP_CACHE.get(want)
+    if cached is not None and cached[1] > now:
+        return cached[0]
+    ip = _resolve_cairn_container_ip(want)
+    _CAIRN_IP_CACHE[want] = (ip, now + _CAIRN_IP_TTL_S)
+    return ip
+
+
+def _resolve_cairn_container_ip(want: str) -> str | None:
+    """One docker ps + one batched inspect over all agent containers."""
+    import subprocess
+
+    try:
+        ids = subprocess.run(
+            ["docker", "ps", "-q", "--filter", "label=cage.component=agent"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.split()
+    except Exception:
+        return None
+    if not ids:
+        return None
+    # Inspect every candidate in ONE call (not one subprocess per container) --
+    # ``docker inspect id1 id2 ...`` returns a JSON array.
+    try:
+        infos = json.loads(subprocess.run(
+            ["docker", "inspect", *ids], capture_output=True, text=True, timeout=10,
+        ).stdout or "[]")
+    except Exception:
+        return None
+    for info in infos:
+        mounts = info.get("Mounts") or []
+        if not any(os.path.realpath(str(m.get("Source", ""))) == want for m in mounts):
+            continue
+        nets = (info.get("NetworkSettings") or {}).get("Networks") or {}
+        for net in nets.values():
+            ip = (net or {}).get("IPAddress")
+            if ip:
+                return ip
+    return None
+
+
+# The Cairn frontend is vendored alongside the agent source; the inspector
+# serves that single copy and backs it with a synthesized multi-project API, so
+# the graph UI is 100% Cairn's own with no separate Cairn server or DB.
+_CAIRN_STATIC_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "third_party" / "Cairn" / "cairn" / "src" / "cairn" / "server" / "static"
+)
+# Inside each trial container Cairn always names its single project ``proj_001``.
+_CAIRN_CONTAINER_PROJECT_ID = "proj_001"
+
+
+def _cairn_graph_source(trial_dir: Path) -> tuple[Path, bool]:
+    """Best available graph file for a trial, and whether it is the FINAL one.
+
+    - ``workspace/cairn_graph.yaml`` -- the settled graph, collected to host at a
+      *clean* trial end -> final (status "completed").
+    - ``proxy/cairn_graph.yaml`` -- a live snapshot the entrypoint writes every
+      poll into the bind-mounted proxy dir; appears on the host in real time, so
+      the graph is observable MID-RUN and SURVIVES an interrupted trial (whose
+      workspace is never collected) -> not final (status "active", keeps the
+      frontend polling so the graph grows as the run proceeds).
+
+    Returns ``(path, is_final)``; falls back to the canonical workspace path
+    (is_final True) when neither exists yet, so ``.is_file()`` callers still work.
+    """
+    workspace = trial_dir / "workspace" / "cairn_graph.yaml"
+    if workspace.is_file():
+        return workspace, True
+    live = trial_dir / "proxy" / "cairn_graph.yaml"
+    if live.is_file():
+        return live, False
+    return workspace, True
+
+
+def _cairn_snapshot_path(trial_dir: Path) -> Path:
+    """The path of the best available graph file (see ``_cairn_graph_source``)."""
+    return _cairn_graph_source(trial_dir)[0]
+
+
+def _cairn_trial_label(trial_dir: Path) -> str:
+    """Human label for a trial's single Cairn project: its id under ``trials/``.
+
+    e.g. ``.../trials/pb-postexp-range-1-l0/pass_1`` -> ``pb-postexp-range-1-l0/pass_1``.
+    Used as the graph's project title so the viewer shows *which* trial it is
+    (Cairn's project id is always ``proj_001`` -- one project per trial).
+    """
+    parts = trial_dir.parts
+    if "trials" in parts:
+        idx = len(parts) - 1 - parts[::-1].index("trials")
+        rel = "/".join(parts[idx + 1:])
+        if rel:
+            return rel
+    return trial_dir.name
+
+
+def _cairn_slug(trial_rel: str) -> str:
+    """Slash-free, hash-safe project id for a trial within its run."""
+    return trial_rel.replace("/", "~")
+
+
+def _cairn_unslug(slug: str) -> str:
+    return slug.replace("~", "/")
+
+
+def _cairn_resolve_trial(run_dir: Path, slug: str) -> Path | None:
+    """Resolve a gallery slug to a trial dir under the run, or None (no abort).
+
+    Like ``_resolve_trial_candidate`` but returns None instead of raising an
+    HTML error, so the gallery's JSON API never emits an HTML body the frontend
+    can't parse.
+    """
+    trial_rel = _cairn_unslug(slug)
+    if ".." in Path(trial_rel).parts:
+        return None
+    trials_root = (run_dir / "trials").resolve()
+    candidate = (trials_root / trial_rel).resolve()
+    if not _is_relative_to(candidate, trials_root):
+        return None
+    if not is_known_trial_path(candidate):
+        return None
+    return candidate
+
+
+def _cairn_load_snapshot(trial_dir: Path, project_id: str = _CAIRN_CONTAINER_PROJECT_ID,
+                         *, title: str | None = None, status: str = "completed") -> dict | None:
+    """Parse ``cairn_graph.yaml`` into the {project, facts, intents} Cairn reads.
+
+    ``project_id``/``title`` let the settled snapshot stand in for a specific
+    gallery project (each trial is its own isolated Cairn project). ``status``
+    is "completed" for a final snapshot or "active" for a still-growing live one.
+    """
+    import yaml
+
+    snap = _cairn_snapshot_path(trial_dir)
+    if not snap.is_file():
+        return None
+    try:
+        data = yaml.safe_load(snap.read_text()) or {}
+    except Exception:
+        return None
+    proj = data.get("project") or {}
+    facts = [
+        {"id": f.get("id"), "description": f.get("description", "")}
+        for f in (data.get("facts") or [])
+        if f.get("id")
+    ]
+    # The export drops intent ids; the graph needs them for node/edge ids, so
+    # re-mint them deterministically in file order (i001, i002, ...).
+    intents = []
+    for n, it in enumerate(data.get("intents") or [], start=1):
+        intents.append({
+            "id": f"i{n:03d}",
+            "from": it.get("from") or [],
+            "to": it.get("to"),
+            "description": it.get("description", ""),
+            "creator": it.get("creator"),
+            "worker": it.get("worker"),
+            "last_heartbeat_at": it.get("concluded_at"),
+            "created_at": it.get("created_at"),
+            "concluded_at": it.get("concluded_at"),
+        })
+    project = {
+        "id": project_id,
+        "title": title if title is not None else _cairn_trial_label(trial_dir),
+        "status": status,
+        "bootstrap_enabled": bool(proj.get("bootstrap_enabled", True)),
+        "created_at": intents[0]["created_at"] if intents else None,
+        "reason": None,
+    }
+    return {"project": project, "facts": facts, "intents": intents, "hints": []}
+
+
+def _cairn_serve_static(subpath: str):
+    """Serve a vendored Cairn frontend asset from disk, fast (no proxy hop)."""
+    from flask import send_file
+
+    rel = subpath[len("static/"):]
+    base = _CAIRN_STATIC_DIR.resolve()
+    target = (_CAIRN_STATIC_DIR / rel).resolve()
+    if not str(target).startswith(str(base)) or not target.is_file():
+        abort(404)
+    return send_file(str(target))
+
+
+def _cairn_serve_shell(prefix: str):
+    """Serve Cairn's own frontend shell from disk, rewritten to load under ``prefix``.
+
+    Cairn's SPA hard-codes absolute ``/static`` asset paths and ``fetch('/projects')``
+    with client-side hash routing. Rewriting the asset paths and shimming ``fetch``
+    lets Cairn's *own* UI run same-origin under the per-run ``/cairn-gallery/...``
+    prefix, while the inspector serves its data. It loads once per browser session.
+    """
+    from flask import Response
+
+    index = _CAIRN_STATIC_DIR / "index.html"
+    if not index.is_file():
+        return Response("Cairn frontend assets are not available on this inspector host.",
+                        status=503, mimetype="text/plain")
+    html = index.read_text().replace('="/static/', f'="{prefix}/static/')
+    shim = (
+        "<script>(function(){var P=%r;var f=window.fetch;"
+        "window.fetch=function(u,o){if(typeof u==='string'&&u.charAt(0)==='/'"
+        "&&u.indexOf(P)!==0){u=P+u;}return f(u,o);};})();</script>" % prefix
+    )
+    html = html.replace("<head>", "<head>" + shim, 1)
+    return Response(html, content_type="text/html; charset=utf-8")
+
+
+# A settled snapshot never changes, so its list item is cached by file mtime.
+_CAIRN_LIST_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _cairn_list_item(trial_dir: Path, slug: str, title: str) -> dict | None:
+    """Project-list row for one trial (counts from its snapshot), or None if none."""
+    snap, is_final = _cairn_graph_source(trial_dir)
+    if not snap.is_file():
+        return None
+    status = "completed" if is_final else "active"
+    mtime = snap.stat().st_mtime
+    cached = _CAIRN_LIST_CACHE.get(slug)
+    if cached and cached[0] == (mtime, status):
+        return cached[1]
+    data = _cairn_load_snapshot(trial_dir, slug, title=title, status=status)
+    if data is None:
+        return None
+    intents = data["intents"]
+    open_intents = [i for i in intents if i.get("to") is None]
+    item = {
+        "id": slug, "title": title, "status": status,
+        "bootstrap_enabled": data["project"]["bootstrap_enabled"],
+        "created_at": data["project"]["created_at"], "reason": None,
+        "fact_count": len(data["facts"]), "intent_count": len(intents),
+        "working_intent_count": len([i for i in open_intents if i.get("worker")]),
+        "unclaimed_intent_count": len([i for i in open_intents if not i.get("worker")]),
+        "hint_count": 0,
+    }
+    _CAIRN_LIST_CACHE[slug] = ((mtime, status), item)
+    return item
+
+
+def _cairn_gallery_projects(run_dir: Path) -> list[dict]:
+    """Every trial of the run as an isolated Cairn project (settled or pending)."""
+    items = []
+    trials_root = run_dir / "trials"
+    for td in find_trial_dirs(run_dir):
+        try:
+            trial_rel = td.relative_to(trials_root).as_posix()
+        except ValueError:
+            trial_rel = td.name
+        slug = _cairn_slug(trial_rel)
+        item = _cairn_list_item(td, slug, trial_rel)
+        if item is None:
+            # No snapshot yet -> still running or produced none; show as pending.
+            item = {
+                "id": slug, "title": trial_rel, "status": "active",
+                "bootstrap_enabled": True, "created_at": None, "reason": None,
+                "fact_count": 0, "intent_count": 0,
+                "working_intent_count": 0, "unclaimed_intent_count": 0, "hint_count": 0,
+            }
+        items.append(item)
+    return items
+
+
+def _cairn_proxy_detail(ip: str, slug: str):
+    """Proxy a still-running trial's live project detail, relabeled to its slug."""
+    import urllib.request
+
+    from flask import Response
+
+    try:
+        with urllib.request.urlopen(
+            f"http://{ip}:8000/projects/{_CAIRN_CONTAINER_PROJECT_ID}", timeout=15,
+        ) as up:
+            body = up.read()
+    except Exception:
+        abort(404)
+    try:
+        detail = json.loads(body)
+        if isinstance(detail.get("project"), dict):
+            detail["project"]["id"] = slug  # the container only knows ``proj_001``
+        return jsonify(detail)
+    except Exception:
+        return Response(body, content_type="application/json")
+
+
+# Declare the write verbs so a write from Cairn's frontend reaches the view and
+# gets a JSON 405 -- not Flask's HTML 405, which the frontend can't ``r.json()``.
+_CAIRN_GALLERY_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"]
+
+
+@inspector_bp.route("/cairn-gallery/<benchmark>/<model>/<run_id>/",
+                    defaults={"subpath": ""}, methods=_CAIRN_GALLERY_METHODS)
+@inspector_bp.route("/cairn-gallery/<benchmark>/<model>/<run_id>/<path:subpath>",
+                    methods=_CAIRN_GALLERY_METHODS)
+def cairn_gallery(benchmark: str, model: str, run_id: str, subpath: str):
+    """Cairn's OWN frontend, same-origin, with every trial of a run as an
+    isolated project (id = trial slug).
+
+    The shell + assets are Cairn's vendored frontend served from disk; the data
+    (``/projects``, ``/projects/<slug>``, ``/settings``, export) is synthesized
+    from each trial's settled ``cairn_graph.yaml`` or proxied live from its
+    container -- so there is no separate Cairn server or DB to keep in sync, yet
+    the UI is 100% Cairn's. The 3 MB frontend loads once per session; from then
+    on, browsing between trials is client-side. Read-only (writes -> 405).
+    """
+    from flask import Response
+
+    run_dir = _find_benchmark_model_run(benchmark, model, run_id)
+    if run_dir is None:
+        abort(404)
+    prefix = f"/cairn-gallery/{benchmark}/{model}/{run_id}"
+
+    # Read-only: the gallery only views graphs (the agent does the real work in
+    # its container). A write must get a JSON 405, not Flask's HTML 405 -- the
+    # frontend does ``r.json()`` and would throw "Unexpected token '<'" on HTML.
+    if request.method not in ("GET", "HEAD"):
+        return jsonify({"detail": "This Cairn graph gallery is read-only."}), 405
+    if subpath in ("", "index.html"):
+        return _cairn_serve_shell(prefix)
+    if subpath.startswith("static/"):
+        return _cairn_serve_static(subpath)
+    # Past here is Cairn's JSON data API: every branch returns JSON (never abort).
+    if subpath == "settings":
+        return jsonify({"intent_timeout": 5, "reason_timeout": 5})
+    if subpath == "projects":
+        return jsonify(_cairn_gallery_projects(run_dir))
+    if subpath.startswith("projects/"):
+        rest = subpath[len("projects/"):]
+        is_export = rest.endswith("/export")
+        slug = rest[:-len("/export")] if is_export else rest
+        trial_dir = _cairn_resolve_trial(run_dir, slug)
+        if trial_dir is None:
+            return jsonify({"detail": "No such trial in this run."}), 404
+        snap, is_final = _cairn_graph_source(trial_dir)
+        if is_export:
+            if request.args.get("format") == "yaml" and snap.is_file():
+                return Response(snap.read_text(), content_type="text/plain; charset=utf-8")
+            return jsonify({"detail": "No export for this trial."}), 404
+        # File snapshot first -- no docker (key on this load-heavy host). The
+        # final workspace snapshot reads "completed"; the live proxy-dir snapshot
+        # reads "active" so the frontend keeps polling and the graph grows.
+        if snap.is_file():
+            status = "completed" if is_final else "active"
+            return jsonify(_cairn_load_snapshot(trial_dir, slug,
+                                                title=_cairn_unslug(slug), status=status))
+        # No file yet -> if the trial is still running, proxy its live graph
+        # (covers the brief window before the first periodic snapshot is written,
+        # and trials from older images that don't persist one).
+        ip = _cairn_container_ip(trial_dir)
+        if ip:
+            return _cairn_proxy_detail(ip, slug)
+        # Known trial, no graph at all (pending / never ran / interrupted before
+        # producing one). Return an EMPTY graph as JSON, never an HTML 404 the
+        # frontend can't parse (this is the smoke_test_cairn_2 case).
+        return jsonify({
+            "project": {"id": slug, "title": _cairn_unslug(slug), "status": "stopped",
+                        "bootstrap_enabled": True, "created_at": None, "reason": None},
+            "facts": [], "intents": [], "hints": [],
+        })
+    return jsonify({"detail": "Not found."}), 404
 
 
 @inspector_bp.route("/api/trial/<encoded>/summary")

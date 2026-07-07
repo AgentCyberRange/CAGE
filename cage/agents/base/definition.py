@@ -82,6 +82,17 @@ class AgentType(ABC):
 
         return "echo unknown"
 
+    def artifact_files(self) -> list[tuple[str, str]]:
+        """Container files to pull into the trial dir after the agent finishes.
+
+        Returns ``(container_path, artifact_filename)`` pairs. Collection is
+        best-effort — a missing file is skipped silently. The default is none;
+        agents that emit their own logs/traces (e.g. a custom agent's node
+        trace) override this so the runner needs no agent-specific knowledge.
+        """
+
+        return []
+
     def setup_container(
         self,
         container: Any,

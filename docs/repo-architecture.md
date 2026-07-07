@@ -529,6 +529,15 @@ Run artifacts live under `.cage_runs`.
 `proxy.jsonl` is the source of truth for LLM request/response traces. `.traj`
 files are derived artifacts for easier human inspection.
 
+A LangChain/LangGraph custom agent additionally rides its **graph structure on
+the wire**: the runtime base (`cage/agents/custom/trace_runtime`, enabled by the
+`CAGE_TRACE` env) stamps `X-Cage-Node` / `X-Cage-Run-Id` / `X-Cage-Parent-Id`
+headers on each model request; the proxy records them as a `cage_span` field on
+the entry and strips them before forwarding upstream. The trajectory view reads
+`cage_span` to label each step with its real node (and to draw the node route),
+instead of guessing structure from the flat stream — so there is no second trace
+artifact and no second view.
+
 Live-check artifacts are intentionally split:
 
 | Artifact | Writer | Meaning |

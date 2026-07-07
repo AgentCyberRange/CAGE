@@ -160,6 +160,21 @@ def _write_dashboards(
             }
             if r.timing:
                 trial_info["duration_ms"] = r.timing.duration_ms
+            # Carry the canonical start/finish timestamps, and derive the
+            # duration when Timing was not captured (force-killed / resumed
+            # trials leave duration_ms at 0) so the settled overview's duration
+            # column isn't blank for half the run.
+            _rec = _load_json_file(run_dir / "trials" / str(r.trial_id) / "record.json")
+            if isinstance(_rec, dict):
+                _start, _end = _rec.get("started_at"), _rec.get("completed_at")
+                if _start:
+                    trial_info["started_at"] = _start
+                if _end:
+                    trial_info["completed_at"] = _end
+                if not trial_info.get("duration_ms"):
+                    trial_info["duration_ms"] = _duration_ms_between(
+                        _start or "", _end or ""
+                    )
             if r.error:
                 trial_info["error"] = r.error
             if r.metadata.get("status"):
@@ -183,7 +198,12 @@ def _write_dashboards(
                 "input_tokens": proxy_stats["input_tokens"],
                 "output_tokens": proxy_stats["output_tokens"],
                 "reasoning_tokens": proxy_stats["reasoning_tokens"],
+                # num_requests = agent rounds (shown as "steps"); total_requests
+                # and errors let the settled-run overview render the error rate
+                # straight from the projection, no per-trial read.
                 "num_requests": proxy_stats["num_requests"],
+                "total_requests": proxy_stats["total_requests"],
+                "errors": proxy_stats["errors"],
             }
             if output_cfg.dashboard_reasoning and proxy_stats["reasoning_content"]:
                 trial_info["reasoning_content"] = proxy_stats["reasoning_content"]

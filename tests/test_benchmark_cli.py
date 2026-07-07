@@ -361,7 +361,7 @@ models:
             "--models",
             str(models_file),
             "--upstream-proxy",
-            "http://10.1.2.146:7890",
+            "http://192.0.2.10:7890",
             "--timeout",
             "123",
             "--passk",
@@ -397,7 +397,7 @@ models:
     assert config.benchmark_dir == project_file.parent.resolve()
     assert config.benchmark.mode == "fast"
     assert config.benchmark.levels == [0, 1, 2]
-    assert config.proxy.upstream_http_proxy == "http://10.1.2.146:7890"
+    assert config.proxy.upstream_http_proxy == "http://192.0.2.10:7890"
     assert config.execution.timeout == 123
     assert config.execution.max_trials_global == 1
     assert config.execution.max_trial == 7

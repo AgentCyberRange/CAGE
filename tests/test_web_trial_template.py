@@ -22,6 +22,22 @@ def _extract_js_function(source: str, name: str) -> str:
     raise AssertionError(f"Could not extract {name}")
 
 
+def test_cairn_panel_deep_links_to_graph_for_live_and_snapshot() -> None:
+    template = Path("cage/web/templates/trial.html").read_text(encoding="utf-8")
+    start = template.index('id="cairn-graph-panel"')
+    end = template.index("</details>", start)
+    panel = template[start:end]
+
+    # One button serves any cairn trial: live while running, snapshot once done.
+    assert 'href="{{ cairn_graph_url }}"' in panel
+    assert "cairn_graph_snapshot" in panel
+    assert "Open live Cairn graph" in panel
+    assert "Open Cairn graph (final snapshot)" in panel
+    # The button opens Cairn's own gallery frontend, deep-linked to this trial.
+    app_src = Path("cage/web/app.py").read_text(encoding="utf-8")
+    assert 'f"/cairn-gallery/{run_base}/#/projects/{slug}"' in app_src
+
+
 def test_json_syntax_highlighter_does_not_corrupt_tailwind_classes() -> None:
     template = Path("cage/web/templates/trial.html").read_text(encoding="utf-8")
     helper = _extract_js_function(template, "syntaxColorJSON")

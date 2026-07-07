@@ -35,11 +35,17 @@ def start_cache_warmer(root: Path, *, interval_s: float = _WARM_INTERVAL_S) -> t
     """
 
     def _loop() -> None:
-        from cage.web.data import scan_runs
+        from cage.web.data import scan_runs, warm_run_history_cache
 
         while True:
             try:
-                scan_runs(root)
+                runs = scan_runs(root)
+                # Also prime each run's detail-page history cache so the first
+                # click into a run is warm, not just the index. Cached on the
+                # cheap run signature, so a settled run is re-checked in two stat
+                # calls and only dashboard-less/live runs ever re-walk.
+                for run in runs:
+                    warm_run_history_cache(run.path)
             except Exception:
                 # Warming is strictly an optimization — a transient FS/NAS error
                 # must never take down the inspector. Swallow and retry next tick.

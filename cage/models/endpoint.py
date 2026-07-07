@@ -67,6 +67,11 @@ class ModelConfig:
 
         if self.provider in ("openai", "vllm", "sglang"):
             return "openai"
+        if self.provider in ("gemini", "google"):
+            # Google Generative Language API (generateContent). The proxy
+            # forwards these byte-for-byte (needs_translation stays off) and
+            # records an OpenAI-shaped projection for the inspector.
+            return "google"
         return "anthropic"
 
     @property

@@ -2,14 +2,208 @@
 
 > Reference implementations: `cage/agents/qwen_code.py`, `cage/agents/kimi_code.py`
 
-This is the recipe for wrapping a third-party coding-agent CLI (Claude Code,
-Codex, Hermes, Qwen Code, Kimi CLI, …) so `cage run` can drive it. The whole
-integration is **Layer 1 framework + Layer 2 image** — no benchmark code
-should ever change.
+There are **two ways** to add an agent. Pick by what you're integrating:
+
+| | **Custom agent** (manifest) | **Built-in adapter** (Python) |
+|---|---|---|
+| For | *your own* agent — a LangGraph/LangChain graph, a script, any framework you launch with a command | wrapping a third-party coding-agent CLI (Claude Code, Codex, Qwen, …) as a first-class, reusable agent type |
+| You write | a directory with your code + an `agent.yml` (no Python against the framework) | a `cage/agents/<name>/` `AgentType` subclass |
+| Touches `cage/` | no | yes (the adapter + one register line) |
+| Read | **the next section** | **sections 0–8 below** |
 
 If at any step you find yourself touching `cage/sandbox/`, `cage/experiment/`,
 or `examples/*/benchmark.py` to make the new agent work, stop — that means the
 framework is missing an abstraction, not that the agent needs special-casing.
+
+---
+
+## Custom agent — a manifest, no framework code
+
+Use this for **your own** agent: anything you can start with a shell command
+and that reads a prompt + talks to a model + prints an answer. You write zero
+framework code — one generic interpreter (`cage/agents/custom/`) drives any
+such agent from a manifest.
+
+### Shape
+
+A custom agent is a **self-contained directory**: your code plus an `agent.yml`
+that declares how Cage runs it.
+
+```
+references/agentic-poc/        # the agent's own directory
+├── agent.yml                  # the manifest (below)
+├── agentic_poc/               # your code
+└── requirements.txt
+```
+
+### `agent.yml`
+
+```yaml
+name: agentic_poc                 # label / run-dir name (defaults to the dir name)
+image: cage/custom-langgraph:base # runtime base (deps only); your code is copied in
+command: >-                       # the ONE launch command; {tokens} filled by Cage
+  python3 -m agentic_poc {workspace_dir}
+  --model {model_name} --max-iterations {max_iterations} --instruction {task_instruction}
+env:                              # extra env Cage injects (also templated)
+  OPENAI_BASE_URL: "{base_url}"   # point your model client at the sidecar proxy
+  OPENAI_API_KEY: "{api_key}"
+  OPENAI_MODEL: "{model_name}"
+workdir: .                        # optional: cwd for the command, relative to the copied source
+output: stdout                    # optional: stdout (default) | {json_field: <key>}
+state_paths: []                   # optional: dirs to snapshot for stateful runs
+params:                           # optional: your own {placeholder} defaults
+  max_iterations: 10              #   overridable per agent (yaml) or per run (--param)
+```
+
+Only `image` and `command` are required.
+
+### The `{tokens}` Cage fills (the run-parameter surface)
+
+| Token | Value |
+|---|---|
+| `{task_instruction}` | the benchmark's task instruction for the whole agent (shell-quoted automatically) |
+| `{model_name}` | the selected model name (honours per-agent overrides) |
+| `{base_url}` | the endpoint your client should call = the in-container sidecar proxy (so calls are intercepted). OpenAI-protocol models get the `/v1` suffix; Anthropic models don't. |
+| `{api_key}` | the model's API key |
+| `{max_rounds}` | the per-trial round budget (Cage's, not your agent's internal loop count) |
+| `{workspace_dir}` | the task workspace path (`/home/agent/workspace`) |
+| `{model.<field>}` | **any field of the model's `config/models.yml` entry**, incl. `{model.extra.<key>}` — this is how per-model knobs flow without Cage hardcoding them |
+
+These names are **reserved** (Cage fills them); your own `params` (below) use any
+other name. An unknown `{token}` fails at config-load (fast), not mid-trial.
+
+### Your own `params` (everything else is yours)
+
+Any `{placeholder}` that isn't a reserved token is a **user param** — your agent's
+own knobs (loop counts, temperatures, feature flags), with no Cage code to add.
+A param's value comes from the first of these that sets it, later winning:
+
+1. `params:` in `agent.yml` — the author's default.
+2. `agents[].params` in the experiment yaml — per-benchmark override.
+3. `cage run … --param KEY=VALUE` — per-run override (repeatable).
+
+```yaml
+# experiment yaml — override the manifest default for this benchmark
+agents:
+  - id: agentic_poc
+    source: ../../references/agentic-poc
+    models: [{ id: nex-n2 }]
+    params:
+      max_iterations: 20
+```
+
+```bash
+cage run examples/cybergym/default_cybergym.yml --agent agentic_poc --param max_iterations=30
+```
+
+A reserved Cage token always wins over a same-named param (you can't shadow
+`{model_name}` etc.). A `{placeholder}` left with no value anywhere fails at
+config-load. `--param` needs an unambiguous agent — pass `--agent <id>` when the
+run has more than one.
+
+### What Cage does per trial
+
+1. Loads `<source>/agent.yml`.
+2. Copies the whole source directory into the container at `/opt/cage-agent/src`
+   (a `docker cp`, the same pattern used for the proxy sidecar — outside the
+   workspace so the per-trial reset never wipes it; edit your code and re-run
+   with no image rebuild; the process stays sealed in Docker, nothing is
+   bind-mounted).
+3. Fills the `{tokens}` in `command` and `env` from the resolved model + proxy + prompt.
+4. Runs the command in `workdir` (as the `agent` user).
+5. Reads the answer per `output` (default: stdout).
+
+### Wire it into a benchmark
+
+In any benchmark's `agents:` list, an entry with a `source:` **is** a custom
+agent (no `kind:` needed). `source` resolves relative to the experiment file.
+
+```yaml
+agents:
+  - id: agentic_poc                      # run-dir / label (optional; defaults to manifest name)
+    source: ../../references/agentic-poc # dir with agent.yml + code
+    models:
+      - id: nex-n2                       # an id from config/models.yml
+    max_concurrent: 3
+```
+
+### Build the runtime base (once)
+
+The manifest's `image` carries only the framework deps (e.g. langgraph), never
+your code. Build it once; rebuild only when *dependencies* change:
+
+```bash
+docker build -f docker/custom_langgraph.Dockerfile -t cage/custom-langgraph:base .
+```
+
+### Constraints (read these)
+
+- **Your model client must honour `{base_url}`** (or the `OPENAI_BASE_URL` /
+  `ANTHROPIC_BASE_URL` env Cage exports). Hardcode an endpoint and you bypass
+  interception. LangChain's `ChatOpenAI()` reads `OPENAI_BASE_URL` by default,
+  so usually you set the env and it just works.
+- **No docker-in-docker.** Your agent already runs inside Cage's container; if
+  it spawns its own Docker, you pay nested-container overhead. Do your work with
+  the container's shell/files.
+- **Copying solves *code* iteration, not *dependency* iteration** — a new pip
+  dep means rebuilding the base image.
+- **`output`** supports `stdout` (default) and `{json_field: <key>}` (parse
+  stdout as JSON, take that key). Reading a result *file* is not supported
+  (`parse_output` sees only stdout/stderr).
+
+### Observability — your graph shows up in the trajectory (no setup)
+
+If your agent is built on **LangChain / LangGraph**, the runtime base auto-attaches
+a global callback (via `CAGE_TRACE`, which Cage sets for you) that stamps the
+current **LangGraph node** on every model request. The in-container proxy records
+it in `proxy.jsonl`, so the inspector's trajectory becomes node-aware for free —
+no tracing code in your agent:
+
+- a **node route** strip (e.g. `prepare → global_map → candidate_dev → …`) and a
+  per-step **node badge** — the real graph, not a guessed structure;
+- each node/agent's **system + user prompt**, surfaced at its first appearance;
+- for agents whose tools run in plain Python (not LangChain tools), the tool
+  **result** paired back under each action.
+
+You write plain LangGraph. Two notes: a node that issues no model request
+(deterministic Python, e.g. a `prepare`/`finalize` step) won't appear — the
+trajectory is built from the requests the proxy sees; and a new pip dependency
+means rebuilding the runtime base image.
+
+### Worked example: `references/agentic-poc` on CyberGym
+
+The manifest above is real. Wired into `examples/cybergym/default_cybergym.yml`,
+`cage run` launches, per trial:
+
+```
+cd /opt/cage-agent/src && OPENAI_BASE_URL='http://127.0.0.1:<port>/v1' OPENAI_API_KEY='…' OPENAI_MODEL='nex-n2' \
+  python3 -m agentic_poc /home/agent/workspace --model nex-n2 --max-iterations 10 --instruction '<cybergym prompt>'
+# (--max-iterations comes from params.max_iterations=10; override with --param max_iterations=N)
+```
+
+The workspace already holds CyberGym's `README.md` / `submit.sh` / `repo-vul.tar.gz`;
+the agent reads them, `submit.sh` posts its PoC, and CyberGym scores via the
+grading service. The LLM calls go through the sidecar proxy.
+
+### Files to touch
+
+```
+references/<agent>/agent.yml             # the manifest, beside your code
+examples/<bench>/default_<bench>.yml     # +1 agents: entry with `source:`
+docker/custom_langgraph.Dockerfile       # a runtime base (reuse across custom agents)
+```
+
+Nothing in `cage/` changes — the generic `cage/agents/custom/` interpreter
+already handles any manifest.
+
+---
+
+## Built-in adapter (Python `AgentType`)
+
+The rest of this guide is the heavier path: wrapping a third-party coding-agent
+CLI (Claude Code, Codex, Hermes, Qwen Code, Kimi CLI, …) as a registered
+`AgentType` so `cage run` can drive it. The whole integration is **Layer 1
+framework + Layer 2 image** — no benchmark code should ever change.
 
 ---
 

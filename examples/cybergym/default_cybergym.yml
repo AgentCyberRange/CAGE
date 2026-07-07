@@ -71,6 +71,20 @@ eval:
     # IGNORED while binary_dir is set (task_ids applies in both modes).
     # image_cache_dir: ./datasets/image-cache
     # image_cache: { pinned_task_ids: ./datasets/cybergym_images.txt, max_evictable_gb: 100, evict: true, min_free_gb: 50, preload: true }
+    # --- White-box debug mode (a.k.a. dynamic_sandbox) -----------------------
+    # OFF by default = upstream's blind contract (source + a submit oracle only).
+    # ON = stage the prebuilt vulnerable target into the agent (identity-
+    # neutralised: /out/fuzzer + rewritten wrapper) AND run it in the debug image
+    # (dynamic_sandbox_image, ABI-matched to the binary), so the agent reproduces
+    # the crash LOCALLY before submitting. Needs binary_dir. Flipping this ONE
+    # flag swaps both the workspace and the runtime image — no agents[].image edit.
+    # Toggle per-run without editing yaml:
+    #   cage run cybergym --dynamic-sandbox true
+    #   cage run cybergym --set eval.benchmark.dynamic_sandbox=true
+    # NOTE: this is the white-box variant, NOT blind official CyberGym — keep its
+    # results on a separate curve. dynamic_sandbox_image overrides the debug image.
+    dynamic_sandbox: false
+    # dynamic_sandbox_image: cage/claude-code:cyberdebug
     # level0 repo only · level1 +description · level2 +crash trace · level3 +patch.
     difficulty: level1
     # Subset further from the CLI with `--sample arvo_10400 ...` or `eval.limit`.
@@ -80,6 +94,13 @@ eval:
       enabled: true
       # host: 172.17.0.1   # agent->service via docker host gateway (default)
       # port: 0            # 0 = auto-pick a free port
+      # task_id masking (upstream's standard eval: see its README `--mask_map_path`).
+      # ON by default — the agent sees a masked id (e.g. fd399a9d9e54) in submit.sh
+      # instead of "arvo:1065", so it can't look up the public ARVO bug. The server
+      # unmasks before grading. Set false to show the real id (matches pre-masking
+      # runs but is no longer faithful to upstream).
+      mask: true
+      # mask_map_path: ./mask_map.json   # override the bundled 1507-task map
   limit: null
 
 target:
@@ -106,36 +127,62 @@ runtime:
     enabled: false
 
 agents:
+  # Built-in claude_code agent. Select it with `--agent claude_code` and pick the
+  # weights with `--model <id>` (any config/models.yml entry — e.g. the swappable
+  # cyber slot qwen36-27b-cyber-think, qwen36-27b-base-think, glm-5.1-sii-n2, …).
+  # The fixed cyber-run knobs are baked here ONCE so per-run is pure CLI:
+  #   cage run cybergym --agent claude_code --model <id> \
+  #     --task-ids ./datasets/cybergym_repr100.txt --upstream-proxy http://<host-ip>:7890 \
+  #     --max-concurrent 8 --run-id <id>
+  # BASH_*_TIMEOUT_MS=600000: submit.sh binary grading can take ~150s; the CLI's
+  # default 120s Bash kill would abort it mid-grade. WebFetch/WebSearch disallowed
+  # to keep the contract blind. No max_output_tokens (do not cap it).
   - id: claude_code
     kind: claude_code
-    models:
-      # Repo model ids from config/models.yml (see config/models.example.yml).
-      - id: glm-5.1
-        extra_env:
-          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
-          DISABLE_INTERLEAVED_THINKING: "1"
-    image: pursu1ng/cage-images:claude-code-latest
+    image: cage/claude-code:latest
     home: /home/agent/workspace
-    # Concurrency: how many trials this agent runs AT ONCE (not a total cap).
-    # Override at the CLI with --max-concurrent N. Raise for a faster full run.
-    max_concurrent: 3
-    # Auto-compaction trigger as a fraction (0..1) of the context window. OMIT
-    # this (the default) and each agent keeps its CLI's OWN default — Claude Code
-    # ~0.835, kimi 0.85, qwen its built-in — CAGE does not impose one. Set it
-    # ONLY to deliberately compact earlier/later, e.g.
-    #   context_compaction_threshold: 0.8
-    # Per-agent mapping: claude_code -> CLAUDE_AUTOCOMPACT_PCT_OVERRIDE (integer
-    # percent; the CLI caps it at its own default, so you can only LOWER it),
-    # qwen_code -> chatCompression.contextPercentageThreshold, kimi_code ->
-    # loop_control.compaction_trigger_ratio. (To raise the window itself, declare
-    # max_context_size on the model — but note claude_code can't honour that.)
+    max_concurrent: 8
+    extra_env:
+      BASH_DEFAULT_TIMEOUT_MS: "600000"
+      BASH_MAX_TIMEOUT_MS: "600000"
     session_args:
       - --permission-mode
       - bypassPermissions
       - --verbose
-      # Align with the upstream CyberGym claude_code runner's "no web tools"
-      # setting (examples/agents/claude_code/run.py: disallowed_tools =
-      # "WebFetch,WebSearch"). The PoC must come from the agent's own analysis,
-      # not from looking the CVE up on the web.
       - --disallowedTools
       - WebFetch,WebSearch
+    models:
+      # Default weights; override per-run with --model <id>.
+      - id: qwen36-27b-cyber-think
+  # Custom agent = a self-contained directory (its own code + an agent.yml
+  # manifest). `source` is resolved relative to THIS file; Cage copies the
+  # directory into the container and runs the manifest's command, filling
+  # {model}/{base_url}/{prompt} from the model picked below. Build the runtime
+  # base once:
+  #   docker build -f docker/custom_langgraph.Dockerfile -t cage/custom-langgraph:base .
+  - id: agentic_poc
+    source: ../../references/agentic-poc
+    models:
+      # OpenAI-protocol model id from config/models.yml (agentic_poc uses
+      # ChatOpenAI). Override at the CLI with --model <id>.
+      - id: nex-n2
+    home: /home/agent/workspace
+    # How many trials run AT ONCE (not a total cap). Override with --max-concurrent N.
+    max_concurrent: 3
+  # QitOS CyberGym agent — a Cage CUSTOM agent (manifest-driven, zero framework
+  # code), same pattern as cairn. The manifest + thin entrypoint live in-repo at
+  # cage/agents/custom/qitos/ (tracked, travel with the repo); the QitOS harness
+  # source is the pinned submodules third_party/{qitos,cybergym_agent} (git-enforced
+  # commit pin = traceability). It runs `python -m cybergym_agent.run_local`
+  # (HostEnv — no nested docker). Set up once:
+  #   git submodule update --init third_party/qitos third_party/cybergym_agent
+  #   cage agent build --agent qitos
+  # Then:  cage run cybergym --agent qitos --model <id> --upstream-proxy http://<host-ip>:7890
+  - id: qitos
+    source: ../../cage/agents/custom/qitos
+    home: /home/agent/workspace
+    max_concurrent: 4
+    models:
+      # OpenAI-protocol model id from config/models.yml (qitos uses an openai
+      # client). Override at the CLI with --model <id>.
+      - id: glm-5.1-sii

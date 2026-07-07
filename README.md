@@ -232,4 +232,6 @@ never changes.
 - [How a Run Works](docs/how-a-run-works.md) — the run lifecycle and runtime internals.
 - [The CLI](docs/cli-design.md) — every command as a slice of `cage run`.
 - [Running Experiments](docs/running-experiments/README.md) and [Operations](docs/operations/README.md) — scaling, resume, scoring, cleanup.
+- [Adding an Agent](docs/adding-a-new-agent.md) — evaluate **your own agent**: a LangGraph/LangChain graph (or any program) via an `agent.yml` manifest with **no framework code**, or a built-in Python `AgentType`.
+  - [LangGraph / LangChain Agent](docs/langgraph-langchain-agent.md) — focused, hands-on walkthrough for the manifest path, built on the real `references/agentic-poc` example (manifest, proxy wiring, free node-aware tracing).
 - [Writing Benchmarks](docs/writing-benchmarks/README.md) and [Contributing](docs/developing-cage/README.md) — extend CAGE.

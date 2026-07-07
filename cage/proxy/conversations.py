@@ -90,10 +90,15 @@ class Call:
 
 @dataclass
 class Conversation:
-    """One reconstructed conversation (root, subagent, or background)."""
+    """One reconstructed conversation (root, subagent, agent, or background)."""
 
     id: str
-    kind: str  # "root" | "subagent" | "background"
+    kind: str  # "root" | "subagent" | "agent" | "background"
+    # "subagent" is reserved for a conversation LINKED to a parent via the
+    # harness Task/Agent tool (spawned_by set). An independent top-level
+    # conversation that shares the proxy but has no observed spawn edge — a
+    # concurrent worker in an engine like Cairn, or a cooperating agent-team
+    # member — is "agent": a peer of the root, not a child of it.
     parent_id: str | None = None
     spawned_by: dict[str, Any] | None = None  # {request_id, tool_use_id, parent_index}
     subagent_type: str | None = None
@@ -409,16 +414,39 @@ class _OpenChain:
     def continues(self, call: Call) -> bool:
         if self.stable_system != call.stable_system:
             return False
+        # Worker-identity gate: a conversation is anchored on its OPENING user
+        # turn (messages[0]), which is invariant across every one of its calls —
+        # normal turns, retries, and post-compaction continuations all keep it.
+        # A call whose opening turn differs is a different worker/subagent even
+        # when it shares the system prompt. This is the Cairn case: many
+        # concurrent workers, one system prompt, distinct task-graph snapshots as
+        # their opening message — the head0 gate keeps their interleaved calls in
+        # separate chains instead of letting monotonic growth merge them.
+        self_head0 = self.anchor_head[0] if self.anchor_head else ""
+        call_head0 = call.msg_head[0] if call.msg_head else ""
+        if self_head0 and call_head0 and self_head0 != call_head0:
+            return False
         if call.n_msgs == 0 and self.last_n_msgs == 0:
             return True  # no message-history signal at all (degenerate/bodyless
             # audit entries) — keep them together rather than spawn phantoms
-        if call.n_msgs <= self.last_n_msgs:
-            return False  # history did not grow — not a normal continuation
-            # (a normal agent turn appends assistant + tool_result(s), so the
-            #  message count strictly increases; equal/smaller means a fresh
-            #  conversation, a repeated one-shot, or a compaction)
-        anchor_len = min(len(call.msg_head), len(self.anchor_head))
-        if anchor_len and call.msg_head[:anchor_len] != self.anchor_head[:anchor_len]:
+        # A genuine fresh start — only the opening message, with real input
+        # tokens — begins a NEW conversation, even under an identical opening
+        # anchor (a same-prompt sibling worker). Retries/duplicates (which never
+        # carry real input tokens on a bare opening) are absorbed below.
+        if call.n_msgs <= 1 and call.input_tokens > 0:
+            return False
+        if call.n_msgs > self.last_n_msgs:
+            anchor_len = min(len(call.msg_head), len(self.anchor_head))
+            if anchor_len and call.msg_head[:anchor_len] != self.anchor_head[:anchor_len]:
+                return False
+            return True
+        # call.n_msgs <= last_n_msgs, same worker anchor, not a fresh start. A
+        # post-compaction continuation collapses the history but must stay a
+        # SEPARATE chain so pass 2 can record the compaction boundary — leave it.
+        # Everything else here is a retry / bodyless duplicate / re-sent earlier
+        # state of THIS worker (an in=0 audit entry or a non-monotonic dip):
+        # absorb it rather than spawn a phantom conversation.
+        if call.is_continuation:
             return False
         return True
 
@@ -449,7 +477,10 @@ def reconstruct_forest(entries: list[dict[str, Any]]) -> ConversationForest:
             open_chains.append(match)
         match.conv.call_indices.append(call.index)
         call_to_conv[call.index] = match.conv.id
-        match.last_n_msgs = call.n_msgs
+        # Keep the high-water mark: an absorbed retry / dip must not lower the
+        # chain's growth frontier, or the next real turn would look like a jump
+        # from the dip and could be mis-split.
+        match.last_n_msgs = max(match.last_n_msgs, call.n_msgs)
         match.peak_in = max(match.peak_in, call.input_tokens)
 
     # --- Pass 2: classify, merge compaction continuations, link subagents. ---
@@ -553,7 +584,11 @@ def _classify_and_link(
         elif len(conv.call_indices) == 1 and first_call.input_tokens <= _BACKGROUND_MAX_INPUT_TOKENS:
             conv.kind = "background"
         else:
-            conv.kind = "subagent"  # visible but unattributed (no parent edge)
+            # A substantial conversation with no Task/Agent spawn edge is an
+            # independent top-level agent (a Cairn worker, an agent-team peer),
+            # NOT a subagent of the root. Calling it "subagent:?" implied a
+            # delegation hierarchy that the stream gives no evidence for.
+            conv.kind = "agent"
 
     # --- Depth from parent chain. ---
     conv_by_id = {c.id: c for c in conversations}
@@ -606,17 +641,24 @@ def _finalize(
     root_usage = dict(root.usage) if root else {
         "input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0, "num_requests": 0,
     }
-    # Root rounds = root calls that are agent decisions: exclude the compaction
+    # Root rounds = root calls that are agent decisions. Exclude the compaction
     # CALLS themselves (the model summarizing its own context is bookkeeping, not
-    # a new agent turn). The continuation that resumes from the summary IS a real
-    # agent turn, so it stays counted.
+    # a new agent turn) AND absorbed retries / bodyless duplicates (in=0 audit
+    # entries that carry no new decision). The continuation that resumes from a
+    # summary IS a real agent turn, so it stays counted.
     root_rounds = 0
     if root:
-        root_rounds = max(len(root.call_indices) - len(root.compaction_calls), 0)
+        compaction = set(root.compaction_calls)
+        root_rounds = sum(
+            1
+            for i in root.call_indices
+            if i not in compaction and by_index[i].input_tokens > 0
+        )
 
     structure = {
         "num_conversations": len(conversations),
         "num_subagents": sum(1 for c in conversations if c.kind == "subagent"),
+        "num_agents": sum(1 for c in conversations if c.kind == "agent"),
         "num_background_calls": sum(
             len(c.call_indices) for c in conversations if c.kind == "background"
         ),

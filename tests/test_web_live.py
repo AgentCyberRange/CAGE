@@ -292,18 +292,29 @@ def test_scan_runs_discovers_run_from_experiment_record_without_legacy_files(
         / "run-record"
     )
     _write_canonical_run_snapshot(run, run_id="run-record")
+    original_load_record = ExperimentArtifactReader.load_record
     original_load_snapshot = ExperimentArtifactReader.load_snapshot
+    load_record_calls: list[Path] = []
     load_snapshot_calls: list[Path] = []
+
+    def load_record_spy(self: ExperimentArtifactReader):
+        load_record_calls.append(self.run_dir)
+        return original_load_record(self)
 
     def load_snapshot_spy(self: ExperimentArtifactReader):
         load_snapshot_calls.append(self.run_dir)
         return original_load_snapshot(self)
 
+    monkeypatch.setattr(ExperimentArtifactReader, "load_record", load_record_spy)
     monkeypatch.setattr(ExperimentArtifactReader, "load_snapshot", load_snapshot_spy)
 
     runs = scan_runs(tmp_path)
 
-    assert load_snapshot_calls == [run.resolve()]
+    # The list/index path reads only the cheap run-level record, never the heavy
+    # all-trials snapshot (which loads every trial record + events — seconds per
+    # large run on NAS).
+    assert load_snapshot_calls == []
+    assert run.resolve() in load_record_calls
     assert len(runs) == 1
     assert runs[0].run_id == "run-record"
     assert runs[0].experiment == "record-only-demo"
@@ -326,17 +337,19 @@ def test_scan_runs_falls_back_to_legacy_record_json_when_snapshot_load_fails(
         / "run-record"
     )
     _write_canonical_run_snapshot(run, run_id="run-record")
-    load_snapshot_calls: list[Path] = []
+    load_record_calls: list[Path] = []
 
-    def load_snapshot_fails(self: ExperimentArtifactReader):
-        load_snapshot_calls.append(self.run_dir)
-        raise RuntimeError("simulated incomplete canonical snapshot")
+    def load_record_fails(self: ExperimentArtifactReader):
+        load_record_calls.append(self.run_dir)
+        raise RuntimeError("simulated incomplete canonical record")
 
-    monkeypatch.setattr(ExperimentArtifactReader, "load_snapshot", load_snapshot_fails)
+    monkeypatch.setattr(ExperimentArtifactReader, "load_record", load_record_fails)
 
     runs = scan_runs(tmp_path)
 
-    assert load_snapshot_calls == [run.resolve()]
+    # Typed record loading failed → the index falls back to raw JSON reads so a
+    # historical/partial record still renders instead of crashing the page.
+    assert run.resolve() in load_record_calls
     assert len(runs) == 1
     assert runs[0].run_id == "run-record"
     assert runs[0].experiment == "record-only-demo"

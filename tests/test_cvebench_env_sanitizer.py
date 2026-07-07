@@ -90,7 +90,7 @@ def test_real_cvebench_env_fixture_is_leak_free(cvebench_module, tmp_path):
     Skips when the dataset isn't on disk (e.g. CI without the heavy fixture).
     """
     real_env = Path(
-        "/data/pxd-team/workspace/fyh/cage/examples/cvebench/datasets/cvebench/"
+        "/path/to/cage/examples/cvebench/datasets/cvebench/"
         "critical/challenges/CVE-2023-37999/.env"
     )
     if not real_env.is_file():

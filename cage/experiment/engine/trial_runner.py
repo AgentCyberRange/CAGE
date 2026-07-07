@@ -208,6 +208,7 @@ def _create_container(
     """Create a Container with plugin volumes and env vars."""
     volumes: dict[str, str] = {}
     group_add: list[str] = []
+    privileged = False
     if agent.plugins:
         project_dir = run.project_file.resolve().parent
         volumes = _resolve_plugin_volumes(agent.plugins, project_dir)
@@ -229,6 +230,7 @@ def _create_container(
         )
         volumes.update(agent_resources.volumes)
         group_add.extend(agent_resources.group_add)
+        privileged = privileged or agent_resources.privileged
 
     # ``cage.component=agent`` distinguishes orchestrator-owned containers from
     # target_server target containers that carry the same ``cage.run_id`` label.
@@ -238,9 +240,18 @@ def _create_container(
     labels: dict[str, str] = {"cage.component": "agent"}
     if run_id:
         labels["cage.run_id"] = run_id
+    # A benchmark may require a specific runtime image for the trial (e.g. a
+    # white-box debug image ABI-matched to a binary it stages in). It falls back
+    # to the agent's configured image when the benchmark expresses no preference.
+    image = agent.effective_image
+    benchmark = getattr(run, "benchmark", None)
+    if benchmark is not None:
+        override = benchmark.container_image_override()
+        if override:
+            image = override
     return Container(
         name=name,
-        image=agent.effective_image,
+        image=image,
         env_vars={
             "HOME": AGENT_HOME,
             # Surface the host user's UID/GID so per-trial cleanup can chown
@@ -259,6 +270,7 @@ def _create_container(
         cap_add=["NET_RAW", "NET_ADMIN"],
         group_add=group_add,
         labels=labels,
+        privileged=privileged,
     )
 
 def _setup_container(container: Container, agent: AgentInstance) -> None:
@@ -1354,6 +1366,9 @@ def execute_trial(
                     agent_label=agent.label(),
                     process=proc,
                     max_rounds=effective_max_rounds,
+                    max_output_tokens=run.execution.max_output_tokens,
+                    max_input_tokens=run.execution.max_input_tokens,
+                    max_cost=run.execution.max_cost,
                 )
                 proxy_monitor.start()
 
@@ -1406,6 +1421,7 @@ def execute_trial(
                 )
             live_stop_event, live_stop_thread = _start_live_success_stop_thread(
                 proc,
+                container,
                 live_stop_monitors,
             )
 
@@ -1416,8 +1432,19 @@ def execute_trial(
                 exit_code = proc.returncode
             except subprocess.TimeoutExpired:
                 timed_out = True
+                # proc.kill() only kills the host-side `docker exec` client, not
+                # the agent inside the container; without an in-container kill the
+                # agent keeps running (still burning model quota) and the drain
+                # below would block indefinitely on its still-open stdout pipe.
+                # Reap the in-container agent tree first, then guard the drain so
+                # a wedged pipe can never hang the worker thread.
+                container.kill_agent()
                 proc.kill()
-                stdout, stderr = proc.communicate()
+                try:
+                    stdout, stderr = proc.communicate(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, stderr = "", ""
                 exit_code = -1
                 logger.warning("Agent execution timed out after %ss", run.execution.timeout)
 
@@ -1516,6 +1543,22 @@ def execute_trial(
             )
         except Exception as exc:
             logger.warning("on_trial_complete error: %s", exc)
+
+        # 6.45 Pull any agent-declared artifact files out of the container
+        # (best-effort; e.g. a custom agent's per-node cage_trace.jsonl). The
+        # runner stays agent-agnostic — it just collects what the agent declares.
+        try:
+            declared_artifacts = list(agent.agent_type.artifact_files())
+        except Exception:
+            declared_artifacts = []
+        for container_path, artifact_name in declared_artifacts:
+            try:
+                dest = storage.trial_dir(trial_id) / artifact_name
+                result = container.copy_from(container_path, str(dest))
+                if getattr(result, "exit_code", 1) != 0 and dest.exists():
+                    dest.unlink()  # docker cp left a partial/empty target
+            except Exception as exc:
+                logger.debug("artifact %s not collected: %s", artifact_name, exc)
 
         # 6.5 Generate .traj file from proxy.jsonl
         from cage.proxy.trajectory import generate_traj

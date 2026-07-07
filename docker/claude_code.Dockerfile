@@ -6,7 +6,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list \
     && sed -i 's|http://security.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list
 
-# Install essentials + Python3
+# Install essentials + Python3 + the binary/PoC inspection & build tools agents
+# reflexively reach for across benchmarks (empirically: xxd is by far the most-
+# attempted missing command, then file/nasm/gdb/strace/autotools/cmake). These
+# are basic dev tools — NOT the target binaries — so they belong in the base
+# image and benefit every task, not just cybergym.
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
@@ -14,6 +18,19 @@ RUN apt-get update && apt-get install -y \
     git \
     python3 \
     python3-pip \
+    file \
+    xxd \
+    bsdmainutils \
+    nasm \
+    gdb \
+    strace \
+    ltrace \
+    build-essential \
+    cmake \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies for cage proxy (using Tsinghua PyPI mirror)

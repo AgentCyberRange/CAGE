@@ -623,7 +623,9 @@ def test_run_page_renders_running_trial_progress(tmp_path: Path) -> None:
     assert "range1-L0" in html
     assert "Status" in html
     assert "Running" in html
-    assert "4 steps" in html
+    # 4 upstream attempts, 1 failed => 3 agent rounds. "steps" is the round
+    # count (successful_requests), not total_requests; error rate uses total.
+    assert "3 steps" in html
     assert "25.0% errors" in html
     assert "active" in html
 

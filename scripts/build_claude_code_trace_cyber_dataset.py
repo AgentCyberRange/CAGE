@@ -25,7 +25,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from export_trajectory_events import build_step_records, write_jsonl  # noqa: E402
 
-DEFAULT_OUTPUT_ROOT = Path("/home/pgroup/pxd-team/workspace/fyh/datasets/claude-code-trace-cyber")
+DEFAULT_OUTPUT_ROOT = Path("datasets/claude-code-trace-cyber")
 CYBER_EXAMPLE_DIRS = (
     "autopenbench",
     "cvebench",
@@ -469,7 +469,7 @@ same AgentPentestBench cyber trace collection.
 Repository root used for export:
 
 ```text
-/data/pxd-team/workspace/fyh/cage
+/path/to/cage
 ```
 
 The exporter scans only these cyber benchmark run directories:

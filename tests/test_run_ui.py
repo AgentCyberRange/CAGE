@@ -715,13 +715,13 @@ def test_run_contract_limits_browser_urls_to_one_per_reachability_kind() -> None
         view_links=[
             RunViewLink(base_url="http://127.0.0.1:8090"),
             RunViewLink(base_url="http://0.0.0.0:8090"),
-            RunViewLink(base_url="http://10.1.2.146:8090"),
+            RunViewLink(base_url="http://192.0.2.10:8090"),
             RunViewLink(base_url="http://172.17.0.1:8090"),
             RunViewLink(base_url="http://172.18.0.1:8090"),
         ],
     ).to_plain_text()
 
-    assert "network url: http://10.1.2.146:8090" in text
+    assert "network url: http://192.0.2.10:8090" in text
     assert "local url: http://127.0.0.1:8090" in text
     # The wildcard bind address is never connectable from a browser, so it must
     # not be offered as a clickable URL.
@@ -1113,7 +1113,7 @@ def _long_path_dashboard_contract() -> object:
     from cage.cli.ui.run import RunAgentContract, RunContract, RunViewLink
 
     long_run_dir = (
-        "/data/pxd-team/workspace/fyh/cage/.worktrees/open-source-release-prep/"
+        "/path/to/cage/.worktrees/open-source-release-prep/"
         ".cage_runs/claude_code:deepseek-v4-pro:stateless/"
         "web-claude-deepseek-smoke-001"
     )
@@ -1127,11 +1127,11 @@ def _long_path_dashboard_contract() -> object:
         project_name="agent-pentest-bench-smoke",
         benchmark_name="AgentPentestBench",
         benchmark_path=(
-            "/data/pxd-team/workspace/fyh/cage/.worktrees/open-source-release-prep/"
+            "/path/to/cage/.worktrees/open-source-release-prep/"
             "examples/agent_pentest_bench"
         ),
         project_file=(
-            "/data/pxd-team/workspace/fyh/cage/.worktrees/open-source-release-prep/"
+            "/path/to/cage/.worktrees/open-source-release-prep/"
             "examples/agent_pentest_bench/default_web_exploit.yml"
         ),
         run_id="web-claude-deepseek-smoke-001",
@@ -1141,7 +1141,7 @@ def _long_path_dashboard_contract() -> object:
         dashboard_url=long_dashboard_url,
         inspect_command=(
             "cage inspect "
-            "/data/pxd-team/workspace/fyh/cage/.worktrees/open-source-release-prep/"
+            "/path/to/cage/.worktrees/open-source-release-prep/"
             "examples/agent_pentest_bench"
         ),
         view_links=[

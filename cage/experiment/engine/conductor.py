@@ -32,6 +32,7 @@ from cage.artifacts.canonical_marks import (
     _mark_canonical_run_summary_artifact,
     _mark_canonical_trial_finished,
     _mark_canonical_trial_scoring_for_results,
+    _refresh_canonical_spec_snapshot,
     _reset_canonical_trial_for_rerun,
     _save_canonical_experiment_snapshot,
     _save_run_metadata_snapshot,
@@ -757,6 +758,11 @@ def _run_single_agent(run: ExperimentRun, agent: AgentInstance) -> list[TrialRes
 
         if not _resume_should_preserve_canonical_snapshot(storage, run.resume):
             _save_canonical_experiment_snapshot(run, agent, storage, trials, run_id)
+        else:
+            # Resume preserves the canonical record/evidence, which skips the
+            # snapshot write — refresh just the spec projection so the recorded
+            # config stops drifting from what actually executes.
+            _refresh_canonical_spec_snapshot(run, agent, storage, trials, run_id)
         _save_run_metadata_snapshot(run, agent, storage)
         _save_planned_trials(storage, trials)
         _save_run_manifest(storage, run_manifest)
