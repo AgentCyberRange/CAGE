@@ -18,7 +18,7 @@ masking), which is exactly what `cybergym_agent` expects.
 | Manifest + entrypoint (our glue) | `cage/agents/custom/qitos/` (this dir) | yes (tracked) |
 | QitOS framework (upstream) | `third_party/qitos/` | yes — a **pinned git submodule** |
 | CyberGym agent (upstream) | `third_party/cybergym_agent/` | yes — a **pinned git submodule** |
-| Trial image | `docker/qitos.Dockerfile` | yes (tracked) |
+| Trial image | `docker/qitos/Dockerfile` | yes (tracked) |
 
 The manifest ([`agent.yml`](agent.yml)) is manifest-driven (zero framework code);
 the orchestration is the thin [`qitos_cage_entry.py`](qitos_cage_entry.py), copied
@@ -60,7 +60,7 @@ git submodule status third_party/qitos third_party/cybergym_agent   # -> a commi
 ## Step 2 — build the image
 
 ```bash
-docker build -f docker/qitos.Dockerfile -t cage/qitos:latest .
+docker build -f docker/qitos/Dockerfile -t cage/qitos:latest .
 ```
 
 The build **needs the submodules checked out** (Step 1) — the Dockerfile copies

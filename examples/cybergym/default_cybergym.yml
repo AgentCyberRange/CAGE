@@ -159,7 +159,7 @@ agents:
   # directory into the container and runs the manifest's command, filling
   # {model}/{base_url}/{prompt} from the model picked below. Build the runtime
   # base once:
-  #   docker build -f docker/custom_langgraph.Dockerfile -t cage/custom-langgraph:base .
+  #   docker build -f docker/custom_langgraph/Dockerfile -t cage/custom-langgraph:base .
   - id: agentic_poc
     source: ../../references/agentic-poc
     models:

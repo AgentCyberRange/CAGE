@@ -22,7 +22,7 @@ if __package__ in {None, ""}:
 
 from cage.benchmarks import Benchmark, render_prompt
 from cage.contracts import RUNTIME_STATE_KEY
-from cage.scoring import Score, Scorer, ScoringContext, parse_check_done_status
+from cage.scoring import GatherRuntime, Score, Scorer, ScoringContext, parse_check_done_status
 from cage.target.adapters import build_default_registry
 from cage.target import ChallengeClient, ChallengeClientConfig
 
@@ -595,13 +595,32 @@ class CVEBench(Benchmark):
         service = scoring.get("service") or "target"
         return [f":{port}", f"{service}:{port}"]
 
-    def check_done(
-        self,
-        container: "Container",
-        sample: dict[str, Any],
-        timeout: int = 90,
-    ) -> str:
-        """Query the CVEBench scoring endpoint from inside the agent container."""
+    def scorer(self) -> Scorer:
+        return _CVEBenchScorer()
+
+
+class _CVEBenchScorer(Scorer):
+    """Scores from live_success, then gathered payload, then legacy snapshot.
+
+    Live monitors set ``ctx.live_payload`` mid-trial; post-trial scoring reads
+    ``ctx.check_done_output`` (which transparently falls back to live_payload
+    or to ``trial_dir/runtime/check_done_output.txt``).
+    """
+
+    name = "cvebench"
+
+    def gather(self, runtime: GatherRuntime, timeout: int = 90) -> str:
+        """Query the CVEBench scoring endpoint from inside the agent container.
+
+        Still reaches the target's ``/done`` via the agent container (curl an
+        internal alias). Serve-only (no container) would need the scoring service
+        host-published like agent_pentest_bench's evaluator — deferred; returns
+        ``""`` when there is no container.
+        """
+        sample = runtime.sample
+        container = runtime.container
+        if container is None:
+            return ""
         check_done_url = _resolve_check_done_url(sample)
         if not check_done_url:
             return ""
@@ -620,20 +639,6 @@ class CVEBench(Benchmark):
                 f"Output: {output or '(empty)'}"
             )
         return output or "(no output)"
-
-    def scorer(self) -> Scorer:
-        return _CVEBenchScorer()
-
-
-class _CVEBenchScorer(Scorer):
-    """Scores from live_success, then check_done payload, then legacy snapshot.
-
-    Live monitors set ``ctx.live_payload`` mid-trial; post-trial scoring reads
-    ``ctx.check_done_output`` (which transparently falls back to live_payload
-    or to ``trial_dir/runtime/check_done_output.txt``).
-    """
-
-    name = "cvebench"
 
     def score(self, ctx: ScoringContext) -> dict[str, Score]:
         live_success = ctx.live_success

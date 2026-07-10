@@ -93,6 +93,21 @@ def test_project_status_reads_nested_field(entry):
     assert entry.project_status({}) == ""
 
 
+def test_classify_wrapper_exit_only_completed_is_zero(entry):
+    # Cage treats exit 0 as a completed trial; the wrapper must NOT self-time and
+    # report a false success. Only a genuinely completed project returns 0.
+    assert entry.classify_wrapper_exit({"project": {"status": "completed"}}) == entry.EXIT_OK
+    assert entry.classify_wrapper_exit(
+        {"project": {"status": "active"}}, dispatcher_exited=True
+    ) == entry.EXIT_DISPATCHER_EXITED
+    assert entry.classify_wrapper_exit({"project": {"status": "active"}}) == entry.EXIT_PROJECT_INCOMPLETE
+    assert entry.classify_wrapper_exit({}) == entry.EXIT_PROJECT_INCOMPLETE
+    # a completed project wins even if the dispatcher happened to exit
+    assert entry.classify_wrapper_exit(
+        {"project": {"status": "completed"}}, dispatcher_exited=True
+    ) == entry.EXIT_OK
+
+
 def test_goal_facts_extracts_answer_set(entry):
     detail = {
         "facts": [

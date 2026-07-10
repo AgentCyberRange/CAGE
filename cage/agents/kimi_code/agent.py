@@ -147,7 +147,7 @@ class KimiCodeAgent(AgentType):
     name = "kimi_code"
     state_paths = [".kimi"]
     default_image = "cage/kimi-code:pentestenv"
-    dockerfile = "docker/kimi_code_pentestenv.Dockerfile"
+    dockerfile = "docker/kimi_code/pentestenv.Dockerfile"
 
     def install_command(self, version: str = "latest") -> str:
         """Install kimi-cli via uv (the documented path).

@@ -385,6 +385,14 @@ def _resolve_target(raw: dict[str, Any]) -> TargetConfig:
             "target.embedded is no longer a user-facing field — embedded mode is "
             "always on. Remove `embedded:` from project.yml."
         )
+    if target_raw.get("use_external_access"):
+        raise ValueError(
+            "target.use_external_access is no longer supported. Agents reach "
+            "targets over the isolated docker network (their internal address), "
+            "never host-published ports — this keeps targets off the host so a "
+            "scanning agent can't reach them via localhost. Remove "
+            "`use_external_access:` (and any SSH-tunnel settings) from project.yml."
+        )
     return TargetConfig(
         enabled=target_raw.get("enabled", True),
         run_mode=target_raw.get("run_mode", "remote"),
@@ -394,7 +402,7 @@ def _resolve_target(raw: dict[str, Any]) -> TargetConfig:
         ssh_key_path=ssh_raw.get("ssh_key_path", ""),
         remote_bind_address=ssh_raw.get("remote_bind_address", "127.0.0.1"),
         remote_bind_port=ssh_raw.get("remote_bind_port", 8000),
-        use_external_access=target_raw.get("use_external_access", False),
+        use_external_access=False,  # forbidden above; agents use the isolated network
         host_ip_for_agent=target_raw.get("host_ip_for_agent", ""),
         network_name=target_raw.get("network_name", "cage_net"),
         startup_timeout=(

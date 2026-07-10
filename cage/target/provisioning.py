@@ -746,17 +746,28 @@ def capture_trial_check_done(
     sample: dict[str, Any],
     trial_dir: Path,
     trial_id: str,
+    agent_output_dir: Path | None = None,
 ) -> Path | None:
-    """Run ``Benchmark.check_done`` and save the raw response.
+    """Run the benchmark scorer's live ``gather`` and save the raw evidence.
 
-    Returns the artifact path, or ``None`` when the benchmark has no
-    ``check_done`` endpoint (returns empty string).
+    Returns the artifact path, or ``None`` when the scorer gathers no live
+    evidence (returns empty string). The artifact keeps its
+    ``check_done_output.txt`` name — that is the path ``ScoringContext``
+    reads back post-trial.
     """
     try:
-        output = benchmark.check_done(container, sample)
+        from cage.scoring import GatherRuntime
+
+        output = benchmark.scorer().gather(
+            GatherRuntime(
+                sample=sample,
+                container=container,
+                agent_output_dir=agent_output_dir,
+            )
+        )
     except Exception as exc:
-        output = f"check_done failed: {exc}"
-        logger.warning("check_done capture failed for trial %s: %s", trial_id, exc)
+        output = f"gather failed: {exc}"
+        logger.warning("scorer.gather capture failed for trial %s: %s", trial_id, exc)
 
     if not output:
         return None

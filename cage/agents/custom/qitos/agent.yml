@@ -9,7 +9,7 @@
 #
 # The orchestration is qitos_cage_entry.py (copied into the container by Cage,
 # not baked, so you edit it with no rebuild); the harness itself is vendored
-# UNCHANGED in the image (docker/qitos.Dockerfile).
+# UNCHANGED in the image (docker/qitos/Dockerfile).
 name: qitos
 
 # Image bakes the vendored harness (qitos + cybergym_agent) + deps + the proxy.
@@ -18,7 +18,7 @@ image: cage/qitos:latest
 # ONE build path for every agent: `cage agent build --agent qitos` runs this
 # (checks the submodules are checked out, then a single docker build).
 build:
-  script: docker/build_qitos.sh
+  script: docker/qitos/build.sh
 
 # Runs its tools directly in this trial container (HostEnv, no nested Docker), so
 # no privileged / DinD is needed.

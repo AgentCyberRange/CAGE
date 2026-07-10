@@ -137,6 +137,7 @@ def materialize_compose_runtime(
     cage_run_id: str | None = None,
     audience: str = "internal",
     entry_service_keys: set[str] | None = None,
+    network_only: bool = False,
     challenge_id: str | None = None,
 ) -> ComposeRuntimePlan:
     # ``audience='external'`` + a non-empty ``entry_service_keys`` is the
@@ -308,7 +309,20 @@ def materialize_compose_runtime(
                 internal_port = parse_internal_port(original_ports[0])
                 protocol = parse_port_protocol(original_ports[0]) or "tcp"
 
-        if spec.exposure_mode == "host_ports" and internal_port is not None:
+        _entry_keys = entry_service_keys or set()
+        if network_only and spec.exposure_mode == "host_ports":
+            # network_only: NOTHING is host-published — every service (the
+            # user-facing entry target AND scoring sidecars like ``evaluator``)
+            # is reachable only over the isolated docker network at its internal
+            # address (``container_addr``/``inner_ip``). An agent scanning
+            # localhost or the host reaches nothing. The host-side scorer does
+            # not need a host port either: the host routes directly to the
+            # per-instance bridge, so it POSTs to the evaluator at its inner IP
+            # (see ``_resolve_evaluator_base_url``, which prefers the inner
+            # address). This keeps the isolation promise total — no part of an
+            # instance leaks onto the host.
+            service_config.pop("ports", None)
+        elif spec.exposure_mode == "host_ports" and internal_port is not None:
             external_port = existing_external_ports.get(service_name) or find_free_port_fn()
             port_suffix = f"/{protocol}" if protocol != "tcp" else ""
             bind_ip = _resolve_publish_bind_ip(

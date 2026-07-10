@@ -117,10 +117,10 @@ These are non-negotiable; break one and downstream things stop working:
   `prompts/` if needed, optionally a `cage-org/<dataset-repo>` submodule.
   If you find yourself adding a benchmark name to `cage/`, stop and find
   the missing abstraction.
-- **Adding an agent**: new `cage/agents/<name>/` package + new
-  `docker/<name>*.Dockerfile` + an import line in
-  `cage/agents/__init__.py::register_builtin_agents()`. No benchmark changes
-  should be needed.
+- **Adding an agent**: new `cage/agents/<name>/` package + a
+  `docker/<name>/` dir holding its `Dockerfile` (+ any `<variant>.Dockerfile`)
+  + an import line in `cage/agents/__init__.py::register_builtin_agents()`. No
+  benchmark changes should be needed.
 
 ---
 
@@ -135,5 +135,9 @@ These are non-negotiable; break one and downstream things stop working:
   layout, synchronization checklist.
 - [`docs/targets-check.md`](docs/targets-check.md) — `cage targets-check`
   guide (parallel target smoke test).
+- [`docs/benchmark-serve-mode.md`](docs/benchmark-serve-mode.md) —
+  benchmark-only / serve (PULL) mode: an external agent drives `cage benchmark
+  serve` targets itself (list → launch → prompt → submit → close). The other
+  agent-integration path vs [`adding-a-new-agent`](docs/adding-a-new-agent.md).
 - [`docs/serve-external-audience.md`](docs/serve-external-audience.md) —
-  exposing `cage serve` targets to external clients.
+  the serve HTTP contract: endpoints, two-audience port binding, external token.

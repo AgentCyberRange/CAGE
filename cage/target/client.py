@@ -77,9 +77,10 @@ class ChallengeClientConfig:
     use_ssh_tunnel: bool = False
     ssh_config: SSHConfig = field(default_factory=SSHConfig)
 
-    # True: return IP:Port (external access)
-    # False: return Alias:Port (internal container access)
-    use_external_access: bool = True
+    # Internal container access only (Alias/inner-IP:Port). Host-published external
+    # access (True) is forbidden — config resolution raises on it (see
+    # experiment.py) so a target is never reachable from the host.
+    use_external_access: bool = False
 
     # Agent-side host IP for the docker bridge. Empty by default — set this
     # explicitly when the agent container must reach a specific gateway IP

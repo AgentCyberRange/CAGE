@@ -66,7 +66,7 @@ class ClaudeCodeAgent(AgentType):
     name = "claude_code"
     state_paths = [".claude"]
     default_image = "cage/claude-code:pentestenv"
-    dockerfile = "docker/claude_code_pentestenv.Dockerfile"
+    dockerfile = "docker/claude_code/pentestenv.Dockerfile"
     plugin_images = {"openviking-memory": "openviking"}
 
     def install_command(self, version: str = "latest") -> str:

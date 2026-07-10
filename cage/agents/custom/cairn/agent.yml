@@ -7,7 +7,7 @@
 # hard isolation (the per_trial_bridge) while Cairn owns the intra-trial OODA
 # search. The orchestration lives entirely in cairn_cage_entry.py (copied into
 # the container by Cage); the Cairn engine itself is vendored UNCHANGED in the
-# image (docker/cairn.Dockerfile).
+# image (docker/cairn/Dockerfile).
 name: cairn
 
 # DinD trial image: dockerd + Cairn engine (submodule) + claude. The build is a
@@ -18,7 +18,7 @@ image: cage/cairn:latest
 
 # ONE build path for every agent: `cage agent build --agent cairn` runs this.
 build:
-  script: docker/build_cairn.sh
+  script: docker/cairn/build.sh
 
 # Cairn runs its own Docker daemon inside the trial container — needs privileged.
 privileged: true
@@ -35,8 +35,10 @@ params:
   # point this at ghcr.io/oritera/cairn-worker-container (set worker_tar empty
   # and ensure the inner daemon can pull it).
   worker_image: "cage/cairn-worker:latest"
-  # Wall-clock budget for the whole project (seconds).
-  timeout: "3600"
+  # NB: no `timeout` param. The trial wall-clock is Cage's single trial timeout
+  # (runtime.timeouts.trial_timeout_s) — a wrapper timeout here duplicated it and
+  # caused "false completion". Cage owns cross-cutting concepts (rounds via
+  # {max_rounds}, wall-clock via the trial timeout); params are for Cairn-only knobs.
 
 # {task_instruction} arrives shlex-quoted; the reserved {base_url}/{api_key}/
 # {model_name}/{max_rounds} are filled by Cage (base_url = the in-container proxy,
@@ -51,4 +53,3 @@ command: >
   --budget {max_rounds}
   --workers {workers}
   --worker-image "{worker_image}"
-  --timeout {timeout}

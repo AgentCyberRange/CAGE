@@ -29,5 +29,5 @@ echo "==> submodule pins (traceability):"
 git submodule status third_party/qitos third_party/cybergym_agent | sed 's/^/    /'
 
 echo "==> docker build $TAG"
-docker build -f docker/qitos.Dockerfile -t "$TAG" .
+docker build -f docker/qitos/Dockerfile -t "$TAG" .
 echo "==> done: $TAG"

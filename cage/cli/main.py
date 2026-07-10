@@ -12,6 +12,7 @@ from cage.cli.commands import inspect as inspect_commands
 from cage.cli.commands import model as model_commands
 from cage.cli.commands import run as run_commands
 from cage.cli.commands import score as score_commands
+from cage.cli.commands import serve as serve_commands
 from cage.contracts.logging import LoggingConfig, setup_logging
 
 register_builtin_agents()
@@ -33,8 +34,10 @@ def main(ctx: click.Context, verbose: bool, log_level: str) -> None:
 
     Start with `cage run`: it lists the benchmarks and walks you from a smoke
     trial to a full campaign. Every other command is one slice of a run —
-    `benchmark` prepares it, `model` and `agent` configure it, `inspect`
-    watches it, `score` re-grades it, and `gc` cleans up after it.
+    `benchmark` prepares it (and `benchmark serve` stands its targets up on
+    their own as a browsable range, no run needed), `model` and `agent`
+    configure it, `inspect` watches it, `score` re-grades it, and `gc` cleans
+    up after it.
 
     Docs: https://github.com/AgentCyberRange/CAGE/tree/main/docs
     """
@@ -52,6 +55,9 @@ main.add_command(inspect_commands.inspect)
 main.add_command(model_commands.model_group)
 main.add_command(run_commands.run)
 main.add_command(score_commands.score)
+# `serve` lives under the benchmark group — it stands up a benchmark's targets
+# as a browsable range: `cage benchmark serve <benchmark>`.
+benchmark_commands.benchmark_group.add_command(serve_commands.serve)
 
 
 if __name__ == "__main__":

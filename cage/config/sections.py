@@ -60,7 +60,10 @@ class TargetConfig:
     ssh_key_path: str = ""
     remote_bind_address: str = "127.0.0.1"
     remote_bind_port: int = 8000
-    use_external_access: bool = True
+    # Forbidden if set true (config resolution raises). Agents reach targets over
+    # the isolated docker network, never host-published ports. Kept False-only so
+    # the field still resolves for the client that reads it.
+    use_external_access: bool = False
     # Empty default — set this explicitly when the agent must reach a specific
     # gateway IP instead of ``host.docker.internal``.
     host_ip_for_agent: str = ""

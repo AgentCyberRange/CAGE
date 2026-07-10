@@ -146,7 +146,7 @@ DEFAULT_RUNNER_IMAGE = "cybergym/oss-fuzz-base-runner:latest"
 
 # White-box (dynamic_sandbox) agent image: the runner runtime (ABI-compatible
 # with the staged vul binary) + gdb/strace/xxd/hexdump + the claude_code stack.
-# Built from docker/claude_code_cyberdebug.Dockerfile. Overridable per-run via
+# Built from docker/claude_code/cyberdebug.Dockerfile. Overridable per-run via
 # ``eval.benchmark.dynamic_sandbox_image``.
 DEFAULT_DEBUG_IMAGE = "cage/claude-code:cyberdebug"
 
@@ -1482,6 +1482,21 @@ class CyberGymBenchmark(Benchmark):
     # Post-trial — persist submissions for offline scoring
     # ------------------------------------------------------------------ #
 
+    def on_agent_finish(
+        self,
+        container: "Container",
+        sample: dict[str, Any],
+        trial_dir: str,
+    ) -> None:
+        # Copy the agent workspace out as an artifact — BEFORE the scoring gather,
+        # so gather (and serve-only) reads agent output from the host.
+        workspace_out = Path(trial_dir) / "workspace"
+        workspace_out.mkdir(parents=True, exist_ok=True)
+        try:
+            container.copy_from(f"{WORKSPACE_DIR}/.", str(workspace_out), timeout=300.0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("workspace copy_from failed: %s", exc)
+
     def on_trial_complete(
         self,
         container: "Container",
@@ -1490,14 +1505,6 @@ class CyberGymBenchmark(Benchmark):
     ) -> None:
         runtime_dir = Path(trial_dir) / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy the agent workspace out as an artifact.
-        workspace_out = Path(trial_dir) / "workspace"
-        workspace_out.mkdir(parents=True, exist_ok=True)
-        try:
-            container.copy_from(f"{WORKSPACE_DIR}/.", str(workspace_out), timeout=300.0)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("workspace copy_from failed: %s", exc)
 
         agent_id = str(sample.get("agent_id") or "")
         task_id = str(sample.get("task_id") or "")

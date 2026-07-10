@@ -3,6 +3,7 @@
 from cage.scoring.context import ScoringContext
 from cage.scoring.scorer import (
     CompositeScorer,
+    GatherRuntime,
     Score,
     Scorer,
     extract_thinking_blocks,
@@ -13,6 +14,7 @@ from cage.scoring.scorer import (
 
 __all__ = [
     "CompositeScorer",
+    "GatherRuntime",
     "Score",
     "Scorer",
     "ScoringContext",

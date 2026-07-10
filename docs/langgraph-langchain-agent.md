@@ -63,7 +63,7 @@ Three facts follow from this picture, and they are the whole contract:
 | 1 | Your agent code | any directory in your repo (or a git submodule under `references/`) |
 | 2 | `agent.yml` — the launch manifest | beside your code |
 | 3 | Your LLM client reads `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` | already true for LangChain's `ChatOpenAI()` |
-| 4 | A runtime **base image** (deps only) | reuse the shipped `docker/custom_langgraph.Dockerfile` |
+| 4 | A runtime **base image** (deps only) | reuse the shipped `docker/custom_langgraph/Dockerfile` |
 
 You do **not** write a Python class, touch `cage/`, or edit any benchmark.
 
@@ -87,7 +87,7 @@ references/agentic-poc/
 
 ```bash
 # 1. Build the runtime base once (deps only; your code is NOT baked in).
-docker build -f docker/custom_langgraph.Dockerfile -t cage/custom-langgraph:base .
+docker build -f docker/custom_langgraph/Dockerfile -t cage/custom-langgraph:base .
 
 # 2. Run it on a benchmark (agentic_poc is already wired into cybergym's example).
 cage run examples/cybergym/default_cybergym.yml --agent agentic_poc --max-sample-num 1
@@ -211,7 +211,7 @@ The manifest's `image` is a **deps-only** base. Your agent code is **not** baked
 into it — Cage copies it in at runtime — so you rebuild the image only when a
 *dependency* changes, not when you edit your agent.
 
-Reuse the shipped recipe, `docker/custom_langgraph.Dockerfile` →
+Reuse the shipped recipe, `docker/custom_langgraph/Dockerfile` →
 `cage/custom-langgraph:base`. It already does the four things any custom-agent
 base must:
 
@@ -236,7 +236,7 @@ To add your own dependency, append a `pip install` for **`/usr/bin/python3`** an
 rebuild:
 
 ```bash
-docker build -f docker/custom_langgraph.Dockerfile -t cage/custom-langgraph:base .
+docker build -f docker/custom_langgraph/Dockerfile -t cage/custom-langgraph:base .
 ```
 
 > **Why `/usr/bin/python3`?** The agent runs as the unprivileged `agent` user,
@@ -353,7 +353,7 @@ cd /opt/cage-agent/src \
 ```
 references/my-agent/agent.yml          # the manifest, beside your code
 references/my-agent/my_agent/...        # your LangGraph code; llm client reads OPENAI_BASE_URL
-docker/custom_langgraph.Dockerfile      # reuse as-is, or add your pip deps to /usr/bin/python3
+docker/custom_langgraph/Dockerfile      # reuse as-is, or add your pip deps to /usr/bin/python3
 examples/<bench>/default_<bench>.yml    # +1 agents: entry with `source:`
 ```
 
@@ -372,7 +372,7 @@ already drives any manifest.
   interpreter (token filling, `docker cp`, output parsing).
 - [`cage/agents/custom/trace_runtime/`](../cage/agents/custom/trace_runtime) —
   the zero-code LangGraph trace hook.
-- [`docker/custom_langgraph.Dockerfile`](../docker/custom_langgraph.Dockerfile)
+- [`docker/custom_langgraph/Dockerfile`](../docker/custom_langgraph/Dockerfile)
   — the runtime base recipe.
 - [`docs/adding-a-new-agent.md`](adding-a-new-agent.md) — the heavier path for
   wrapping a third-party agent *CLI* as a registered `AgentType`.

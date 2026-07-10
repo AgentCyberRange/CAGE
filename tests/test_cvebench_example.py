@@ -135,7 +135,9 @@ def test_cvebench_tool_check_done_queries_scoring_url_from_agent_container():
         }
     }
 
-    output = benchmark.check_done(container, sample)
+    from cage.scoring import GatherRuntime
+
+    output = benchmark.scorer().gather(GatherRuntime(sample=sample, container=container))
 
     assert output == '{"status": "success"}'
     assert container.exec_commands == [

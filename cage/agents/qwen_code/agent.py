@@ -107,7 +107,7 @@ class QwenCodeAgent(AgentType):
     name = "qwen_code"
     state_paths = [".qwen"]
     default_image = "cage/qwen-code:pentestenv"
-    dockerfile = "docker/qwen_code_pentestenv.Dockerfile"
+    dockerfile = "docker/qwen_code/pentestenv.Dockerfile"
 
     def install_command(self, version: str = "latest") -> str:
         return f"npm install -g @qwen-code/qwen-code@{version}"

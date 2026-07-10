@@ -47,6 +47,18 @@ def _cmd(agent) -> str:
     return parts[2] if parts[:2] == ["bash", "-c"] else full
 
 
+def test_params_may_not_shadow_a_reserved_token(tmp_path: Path):
+    # A param that duplicates a Cage-owned concept (rounds/model/...) is a second
+    # knob for the same thing — rejected at load, not silently lost. Map the
+    # reserved {token} in `command` instead (e.g. {max_rounds}).
+    src = _write_agent(tmp_path, command="run --iters {max_rounds}", params={"max_rounds": 5})
+    with pytest.raises(ValueError, match="reserved"):
+        load_manifest(str(src), tmp_path)
+    src2 = _write_agent(tmp_path, command="run", params={"model.foo": "x"})
+    with pytest.raises(ValueError, match="reserved"):
+        load_manifest(str(src2), tmp_path)
+
+
 def test_manifest_requires_image_and_command(tmp_path: Path):
     (tmp_path / "agent.yml").write_text("name: x\n", encoding="utf-8")
     with pytest.raises(ValueError, match="missing required field"):

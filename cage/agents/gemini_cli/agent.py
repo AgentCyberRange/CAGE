@@ -72,7 +72,7 @@ class GeminiCliAgent(AgentType):
     name = "gemini_cli"
     state_paths = [".gemini"]
     default_image = "cage/gemini-cli:pentestenv"
-    dockerfile = "docker/gemini_cli_pentestenv.Dockerfile"
+    dockerfile = "docker/gemini_cli/pentestenv.Dockerfile"
 
     def install_command(self, version: str = "latest") -> str:
         return f"npm install -g @google/gemini-cli@{version}"

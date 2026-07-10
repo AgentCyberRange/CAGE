@@ -650,7 +650,7 @@ def _mark_canonical_trial_final_evidence_artifact(
     trial: Trial,
     evidence_path: Path,
 ) -> None:
-    """Index ``Benchmark.check_done`` output as final verifier evidence."""
+    """Index the scorer's live ``gather`` output as final verifier evidence."""
 
     _mark_canonical_trial_scoring_evidence_artifact(
         storage=storage,
@@ -659,7 +659,7 @@ def _mark_canonical_trial_final_evidence_artifact(
         evidence_path=evidence_path,
         kind="final_evidence",
         schema_version="check_done_output.txt.v1",
-        producer="Benchmark.check_done",
+        producer="Scorer.gather",
         content_type="text/plain",
     )
 

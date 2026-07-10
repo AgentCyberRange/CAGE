@@ -57,7 +57,7 @@ class HermesAgent(AgentType):
     name = "hermes"
     state_paths = [".hermes"]
     default_image = "cage/hermes:pentestenv"
-    dockerfile = "docker/hermes_pentestenv.Dockerfile"
+    dockerfile = "docker/hermes/pentestenv.Dockerfile"
     plugin_images = {"openviking-memory": "openviking"}
 
     def install_command(self, version: str = "latest") -> str:

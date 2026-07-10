@@ -617,10 +617,10 @@ def build(agent_name: str, variant: str, version: str, no_cache: bool, build_all
         agent = cls()
 
         if variant:
-            # Single variant
-            vdf = docker_dir / f"{name}_{variant}.Dockerfile"
+            # Single variant → docker/<name>/<variant>.Dockerfile
+            vdf = docker_dir / name / f"{variant}.Dockerfile"
             if not vdf.exists():
-                click.echo(f"Error: variant Dockerfile not found: {vdf.name}")
+                click.echo(f"Error: variant Dockerfile not found: {name}/{variant}.Dockerfile")
                 raise SystemExit(1)
             build_targets.append((vdf, agent.image_for_variant(variant)))
         elif build_all:
@@ -629,10 +629,15 @@ def build(agent_name: str, variant: str, version: str, no_cache: bool, build_all
                 base_df = cage_root / agent.dockerfile
                 if base_df.exists():
                     build_targets.append((base_df, agent.default_image))
-            # All variants: docker/{name}_*.Dockerfile
-            for vdf in sorted(docker_dir.glob(f"{name}_*.Dockerfile")):
-                vname = vdf.stem.removeprefix(f"{name}_")  # e.g. "pentestenv"
-                build_targets.append((vdf, agent.image_for_variant(vname)))
+            # All variants: docker/<name>/<variant>.Dockerfile
+            # (the bare docker/<name>/Dockerfile is the base, handled above)
+            agent_dir = docker_dir / name
+            if agent_dir.is_dir():
+                for vdf in sorted(agent_dir.glob("*.Dockerfile")):
+                    if vdf.name == "Dockerfile":
+                        continue
+                    vname = vdf.stem  # e.g. "pentestenv"
+                    build_targets.append((vdf, agent.image_for_variant(vname)))
         else:
             # Base image only
             if not agent.dockerfile:

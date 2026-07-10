@@ -21,7 +21,7 @@ from cage.artifacts.live_success import (
     parse_live_checks_success,
     record_live_success,
 )
-from cage.scoring import ScoringContext
+from cage.scoring import GatherRuntime, ScoringContext
 
 logger = logging.getLogger(__name__)
 
@@ -310,9 +310,11 @@ class ReactiveLiveCheckMonitor:
                 if matched is None:
                     continue
                 try:
-                    raw = str(self.benchmark.check_done(self.container, self.sample))
+                    raw = str(self.benchmark.scorer().gather(
+                        GatherRuntime(sample=self.sample, container=self.container)
+                    ))
                 except Exception:
-                    logger.debug("check_done failed during reactive scan", exc_info=True)
+                    logger.debug("scorer.gather failed during reactive scan", exc_info=True)
                     continue
                 if not raw:
                     continue
@@ -435,9 +437,11 @@ class CheckDonePoller:
             return existing
 
         try:
-            raw = str(self.benchmark.check_done(self.container, self.sample))
+            raw = str(self.benchmark.scorer().gather(
+                GatherRuntime(sample=self.sample, container=self.container)
+            ))
         except Exception:
-            logger.debug("check_done failed during poll", exc_info=True)
+            logger.debug("scorer.gather failed during poll", exc_info=True)
             return None
         if not raw:
             return None

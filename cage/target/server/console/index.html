@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CAGE · Target Range</title>
+<style>
+  :root {
+    --bg: #070b0a;
+    --panel: #0d1614;
+    --panel-2: #0a1210;
+    --line: #17302a;
+    --line-2: #1f463c;
+    --ink: #cfe9e0;
+    --dim: #6f8c84;
+    --accent: #2fe3ad;
+    --accent-dim: #1c8f6d;
+    --warn: #e3c74f;
+    --bad: #e3654f;
+    --good: #2fe3ad;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--mono); }
+  body { padding: 0 0 64px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #0a1512 0%, #070b0a 100%);
+    padding: 18px 0 16px;
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(4px);
+  }
+  .brand { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .logo {
+    font-weight: 700; letter-spacing: 3px; font-size: 15px;
+    color: var(--accent); text-shadow: 0 0 18px rgba(47,227,173,.35);
+  }
+  .logo .dot { color: var(--dim); }
+  .tag { color: var(--dim); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .ctl { display: flex; align-items: center; gap: 8px; }
+  input, select, button { font-family: var(--mono); font-size: 12px; }
+  input[type=text], input[type=password], select {
+    background: var(--panel-2); border: 1px solid var(--line-2); color: var(--ink);
+    padding: 6px 9px; border-radius: 5px; outline: none;
+  }
+  input::placeholder { color: #4d675f; }
+  input:focus, select:focus { border-color: var(--accent-dim); }
+  button {
+    background: var(--panel-2); border: 1px solid var(--line-2); color: var(--ink);
+    padding: 6px 12px; border-radius: 5px; cursor: pointer; transition: .12s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: rgba(47,227,173,.1); border-color: var(--accent-dim); color: var(--accent); }
+  button.primary:hover { background: rgba(47,227,173,.2); }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  button:disabled { opacity: .4; cursor: default; }
+
+  .statbar { display: flex; gap: 26px; padding: 20px 0 6px; flex-wrap: wrap; }
+  .stat .n { font-size: 26px; font-weight: 700; color: var(--accent); }
+  .stat .l { font-size: 11px; color: var(--dim); letter-spacing: 1.5px; text-transform: uppercase; }
+
+  h2 {
+    font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--dim);
+    margin: 30px 0 12px; display: flex; align-items: center; gap: 10px;
+  }
+  h2::before { content: ""; width: 8px; height: 8px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  h2 .count { color: var(--accent); }
+  h2 .filler { flex: 1; height: 1px; background: var(--line); }
+
+  /* running instances table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; min-width: 780px; }
+  th, td { text-align: left; padding: 10px 14px; font-size: 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 500; letter-spacing: 1px; text-transform: uppercase; font-size: 10px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(47,227,173,.03); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 10px; letter-spacing: .5px; border: 1px solid var(--line-2); color: var(--dim); }
+  .pill.per_agent { border-color: #2a4a6a; color: #7fb0e0; }
+  .pill.per_challenge { border-color: #6a4a2a; color: #e0b07f; }
+  .pill.external { border-color: var(--accent-dim); color: var(--accent); }
+  .dot-h { display: inline-flex; align-items: center; gap: 6px; }
+  .dot-h::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .dot-h.up::before { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .dot-h.down::before { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  .dot-h.unknown::before { background: var(--warn); }
+  .urls a { display: block; font-size: 11px; }
+  .empty { padding: 34px; text-align: center; color: var(--dim); font-size: 12px; }
+
+  /* library grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .card {
+    position: relative; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 15px 15px 13px; transition: .12s;
+  }
+  .card:hover { border-color: var(--line-2); }
+  .card::before, .card::after {
+    content: ""; position: absolute; width: 10px; height: 10px; border-color: var(--accent-dim); opacity: .6;
+  }
+  .card::before { top: -1px; left: -1px; border-top: 1px solid; border-left: 1px solid; }
+  .card::after { bottom: -1px; right: -1px; border-bottom: 1px solid; border-right: 1px solid; }
+  .card .cid { font-size: 14px; font-weight: 700; color: var(--ink); word-break: break-all; }
+  .card .meta { margin: 7px 0 9px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .card .desc { color: var(--dim); font-size: 11.5px; line-height: 1.5; min-height: 34px; margin-bottom: 11px;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .foot { display: flex; align-items: center; gap: 8px; }
+  .card .entries { color: var(--dim); font-size: 10.5px; flex: 1; }
+
+  #toasts { position: fixed; bottom: 18px; right: 18px; z-index: 40; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    background: var(--panel); border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
+    padding: 10px 14px; border-radius: 6px; font-size: 12px; max-width: 380px; box-shadow: 0 8px 30px rgba(0,0,0,.5);
+    animation: slidein .18s ease;
+  }
+  .toast.err { border-left-color: var(--bad); }
+  @keyframes slidein { from { transform: translateX(20px); opacity: 0; } }
+  .muted { color: var(--dim); }
+  .loading { color: var(--dim); font-size: 12px; padding: 20px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap brand">
+    <span class="logo">CAGE<span class="dot"> · </span>TARGET RANGE</span>
+    <span class="tag" id="ns-tag">target range console</span>
+    <span class="spacer"></span>
+    <div class="ctl">
+      <input type="password" id="token" placeholder="bearer token (external only)" style="width:180px" />
+      <label class="tag" style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="probe" /> probe health
+      </label>
+      <button id="refresh">↻ refresh</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="statbar">
+    <div class="stat"><div class="n" id="stat-lib">–</div><div class="l">targets in library</div></div>
+    <div class="stat"><div class="n" id="stat-run">–</div><div class="l">running now</div></div>
+    <div class="stat"><div class="n" id="stat-bench">–</div><div class="l">benchmarks</div></div>
+  </div>
+
+  <h2>Running Instances <span class="count" id="run-count"></span><span class="filler"></span>
+    <span class="tag" id="auto">auto-refresh 8s</span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>Challenge</th><th>Benchmark</th><th>Scope</th><th>Audience</th>
+        <th>Uptime</th><th>Health</th><th>Entry</th><th></th>
+      </tr></thead>
+      <tbody id="inst-body"><tr><td colspan="8" class="loading">loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Target Library <span class="count" id="lib-count"></span><span class="filler"></span>
+    <select id="f-bench"><option value="">all benchmarks</option></select>
+    <select id="f-cat"><option value="">all categories</option></select>
+    <input type="text" id="f-q" placeholder="filter…" style="width:150px" />
+  </h2>
+  <div class="grid" id="lib-grid"><div class="loading">loading…</div></div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const state = { challenges: [], instances: [], busy: new Set() };
+
+function token() { return $("#token").value.trim(); }
+function headers() { const t = token(); return t ? { "Authorization": "Bearer " + t } : {}; }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+function toast(msg, isErr) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isErr ? " err" : "");
+  el.textContent = msg;
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), isErr ? 6000 : 4000);
+}
+
+function fmtUptime(s) {
+  if (s == null) return "–";
+  s = Math.max(0, Math.floor(s));
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m" + (s % 60) + "s";
+  return Math.floor(s / 3600) + "h" + Math.floor((s % 3600) / 60) + "m";
+}
+
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function healthCell(i) {
+  if (i.healthy === true) return '<span class="dot-h up">up</span>';
+  if (i.healthy === false) return '<span class="dot-h down">down</span>';
+  const st = (i.lifecycle_state || "unknown");
+  return '<span class="dot-h unknown">' + esc(st) + "</span>";
+}
+
+function renderInstances() {
+  const body = $("#inst-body");
+  const rows = state.instances;
+  $("#run-count").textContent = rows.length ? "[" + rows.length + "]" : "";
+  $("#stat-run").textContent = rows.length;
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="8" class="empty">no targets running — launch one from the library below</td></tr>'; return; }
+  body.innerHTML = rows.map(i => {
+    const urls = (i.entry_urls || []).map(u => '<a href="' + esc(u.url) + '" target="_blank" rel="noopener">' + esc(u.url) + "</a>").join("");
+    const caddrs = (i.container_addr || []).map(a => '<div style="font-size:11px;color:#2fe3ad" title="internal address on the docker network">' + esc(a) + "</div>").join("");
+    const net = i.network_name ? '<div style="font-size:10px;color:#6f8c84;margin-top:2px">net ' + esc(i.network_name) + (i.network_subnet ? " \u00b7 " + esc(i.network_subnet) : "") + "</div>" : "";
+    const key = i.chal_id + " " + i.run_id;
+    const busy = state.busy.has(key);
+    return "<tr>"
+      + "<td><b>" + esc(i.chal_id) + '</b><div class="muted" style="font-size:10px">' + esc(i.run_id) + "</div></td>"
+      + "<td>" + esc(i.benchmark || "–") + "</td>"
+      + '<td><span class="pill ' + esc(i.target_scope) + '">' + esc(i.target_scope || "–") + "</span></td>"
+      + "<td>" + (i.audience === "external" ? '<span class="pill external">external</span>' : '<span class="pill">' + esc(i.audience || "–") + "</span>") + "</td>"
+      + "<td>" + fmtUptime(i.uptime_s) + "</td>"
+      + "<td>" + healthCell(i) + "</td>"
+      + '<td class="urls">' + ((urls + caddrs + net) || '<span class="muted">–</span>') + "</td>"
+      + '<td style="white-space:nowrap">'
+      + '<button data-submit="' + esc(i.chal_id) + '|' + esc(i.run_id) + '"' + (busy ? " disabled" : "") + ' title="upload the agent output (tar.gz/zip with final_answer/) and score this live instance">' + (busy ? "…" : "submit") + "</button> "
+      + '<button class="danger" data-stop="' + esc(i.chal_id) + '|' + esc(i.run_id) + '"' + (busy ? " disabled" : "") + ">" + (busy ? "…" : "stop") + "</button></td>"
+      + "</tr>";
+  }).join("");
+}
+
+function applyLibraryFilters() {
+  const b = $("#f-bench").value, c = $("#f-cat").value, q = $("#f-q").value.trim().toLowerCase();
+  return state.challenges.filter(ch =>
+    (!b || ch.benchmark === b) && (!c || ch.category === c) &&
+    (!q || (ch.id + " " + ch.name + " " + ch.description).toLowerCase().includes(q)));
+}
+
+function renderLibrary() {
+  const grid = $("#lib-grid");
+  const items = applyLibraryFilters();
+  $("#lib-count").textContent = "[" + items.length + "]";
+  if (!items.length) { grid.innerHTML = '<div class="empty">no targets match</div>'; return; }
+  grid.innerHTML = items.map(ch => {
+    const busy = state.busy.has("launch " + ch.id);
+    const n = ch.entry_service_count || 0;
+    return '<div class="card">'
+      + '<div class="cid">' + esc(ch.id) + "</div>"
+      + '<div class="meta"><span class="pill">' + esc(ch.benchmark || "?") + '</span><span class="pill">' + esc(ch.category || "?") + "</span></div>"
+      + '<div class="desc">' + esc(ch.description || "—") + "</div>"
+      + '<div class="foot"><span class="entries">' + n + (n === 1 ? " entry" : " entries") + "</span>"
+      + '<button class="primary" data-launch="' + esc(ch.id) + '"' + (busy ? " disabled" : "") + ">" + (busy ? "launching…" : "▸ launch") + "</button></div>"
+      + "</div>";
+  }).join("");
+}
+
+function fillFilters() {
+  const benches = [...new Set(state.challenges.map(c => c.benchmark).filter(Boolean))].sort();
+  const cats = [...new Set(state.challenges.map(c => c.category).filter(Boolean))].sort();
+  const keep = (sel, vals) => {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">' + sel.dataset.all + "</option>" + vals.map(v => '<option>' + esc(v) + "</option>").join("");
+    sel.value = cur;
+  };
+  $("#f-bench").dataset.all = "all benchmarks"; $("#f-cat").dataset.all = "all categories";
+  keep($("#f-bench"), benches); keep($("#f-cat"), cats);
+  $("#stat-lib").textContent = state.challenges.length;
+  $("#stat-bench").textContent = benches.length;
+}
+
+async function loadChallenges() {
+  try {
+    state.challenges = await api("/challenges");
+    fillFilters(); renderLibrary();
+  } catch (e) { $("#lib-grid").innerHTML = '<div class="empty">failed to load library: ' + esc(e.message) + "</div>"; }
+}
+
+async function loadInstances() {
+  try {
+    const probe = $("#probe").checked ? "?probe=true" : "";
+    state.instances = await api("/instances" + probe);
+    renderInstances();
+  } catch (e) { $("#inst-body").innerHTML = '<tr><td colspan="8" class="empty">failed to load instances: ' + esc(e.message) + "</td></tr>"; }
+}
+
+async function launch(chalId) {
+  const key = "launch " + chalId;
+  state.busy.add(key); renderLibrary();
+  try {
+    const r = await api("/launch/" + encodeURIComponent(chalId) + "?target_scope=per_agent&network_only=true");
+    toast("launched " + chalId + " → " + (r.run_id || "?"));
+    await loadInstances();
+  } catch (e) { toast("launch failed: " + e.message, true); }
+  finally { state.busy.delete(key); renderLibrary(); }
+}
+
+async function stop(chalId, runId) {
+  const key = chalId + " " + runId;
+  state.busy.add(key); renderInstances();
+  try {
+    await api("/launch/" + encodeURIComponent(chalId) + "?run_id=" + encodeURIComponent(runId), { method: "DELETE" });
+    toast("stopped " + chalId);
+    await loadInstances();
+  } catch (e) { toast("stop failed: " + e.message, true); }
+  finally { state.busy.delete(key); }
+}
+
+// Score a live instance: pick the agent output archive (tar.gz/zip whose
+// final_answer/ holds the reports), POST it to /submit, and toast the verdict.
+// The verdict is also persisted under .cage_runs, so `cage inspect` renders it
+// exactly like a cage-run trial (same root — the console launches, the
+// inspector shows results).
+function submitOutput(chalId, runId) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".tar.gz,.tgz,.tar,.zip,application/gzip,application/zip,application/x-tar";
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    const key = chalId + " " + runId;
+    state.busy.add(key); renderInstances();
+    try {
+      const fd = new FormData();
+      if (file) fd.append("agent_output", file);   // omit for marker-only challenges
+      const r = await api("/submit/" + encodeURIComponent(runId), { method: "POST", body: fd });
+      const scores = r.scores || {};
+      const first = Object.values(scores)[0] || {};
+      const v = (first.value == null) ? "?" : first.value;
+      toast("scored " + chalId + " → value=" + v + (first.explanation ? " · " + first.explanation : ""));
+    } catch (e) { toast("submit failed: " + e.message, true); }
+    finally { state.busy.delete(key); loadInstances(); }
+  };
+  input.click();
+}
+
+document.addEventListener("click", (e) => {
+  const l = e.target.closest("[data-launch]");
+  if (l) return launch(l.getAttribute("data-launch"));
+  const s = e.target.closest("[data-stop]");
+  if (s) { const [c, r] = s.getAttribute("data-stop").split("|"); return stop(c, r); }
+  const sub = e.target.closest("[data-submit]");
+  if (sub) { const [c, r] = sub.getAttribute("data-submit").split("|"); return submitOutput(c, r); }
+});
+["f-bench", "f-cat", "f-q"].forEach(id => $("#" + id).addEventListener("input", renderLibrary));
+$("#refresh").addEventListener("click", () => { loadChallenges(); loadInstances(); });
+$("#probe").addEventListener("change", loadInstances);
+$("#token").addEventListener("change", () => { localStorage.setItem("cage_token", token()); loadChallenges(); loadInstances(); });
+
+$("#token").value = localStorage.getItem("cage_token") || "";
+loadChallenges();
+loadInstances();
+setInterval(loadInstances, 8000);
+</script>
+</body>
+</html>

@@ -93,9 +93,12 @@ def _make_config(
     )
 
 
-def _make_cvebench_config(check_done) -> SimpleNamespace:
+def _make_cvebench_config(gather) -> SimpleNamespace:
     config = _make_config(benchmark_name="cvebench", live_check_enabled=True)
-    config.benchmark.check_done = check_done
+    # Live gather is the scorer's job now: benchmark.scorer().gather(...). Return a
+    # stable scorer object so the mock records every call across the trial.
+    scorer_obj = SimpleNamespace(strategy="post_run", gather=gather)
+    config.benchmark.scorer = lambda: scorer_obj
     return config
 
 
@@ -490,7 +493,11 @@ class TestExecuteTrialSubmitService:
             storage=storage, hook_ctx=hook_ctx, run_id="run-789",
         )
 
-        check_done.assert_called_once_with(container, trial.sample)
+        # gather is now called with a GatherRuntime carrying the live container + sample.
+        check_done.assert_called_once()
+        (runtime_arg,), _ = check_done.call_args
+        assert runtime_arg.container is container
+        assert runtime_arg.sample == trial.sample
         output_path = tmp_path / "trials" / "trial-sample-1" / "runtime" / "check_done_output.txt"
         assert output_path.read_text(encoding="utf-8") == '{"status": true, "message": "ok"}'
 

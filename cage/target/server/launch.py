@@ -5,6 +5,7 @@ import contextlib
 import logging
 import os
 import subprocess
+import time
 import uuid
 from cage.target.adapters.source_config import build_default_registry
 from cage.target.scope import normalize_target_scope, resolve_target_scope
@@ -52,7 +53,11 @@ from cage.target.server.cleanup import (
     _purge_project_by_name,
     _unlink_runtime_compose,
 )
-from cage.target.server.network_debug import _build_entry_urls, build_network_debug
+from cage.target.server.network_debug import (
+    _build_entry_urls,
+    build_container_addrs,
+    build_network_debug,
+)
 from cage.target.server.launch_workflow import (
     ensure_docker_cli_config_dir,
     load_env_file_vars,
@@ -230,9 +235,9 @@ def _reused_launch_response(
     debug = instance.get("debug", {}) or {}
     network_debug = debug.get("network", {}) or {}
     services = instance["services"]
+    entry_keys = set(instance.get("entry_service_keys") or [])
     entry_urls: List[EntryUrl] = []
     if audience == "external":
-        entry_keys = set(instance.get("entry_service_keys") or [])
         entry_urls = _build_entry_urls(
             services=services,
             entry_service_keys=entry_keys,
@@ -250,6 +255,7 @@ def _reused_launch_response(
         debug=debug,
         services=services,
         entry_urls=entry_urls,
+        container_addr=build_container_addrs(services, entry_keys),
     )
 
 
@@ -288,6 +294,8 @@ def _launch_challenge_impl(
     target_scope: Optional[str] = None,
     cage_run_id: Optional[str] = None,
     audience: str = "internal",
+    network_only: bool = False,
+    prompt_level: str = "l0",
 ) -> LaunchResponse:
     """Launch (or reuse, or rebuild) the runtime instance for a challenge.
 
@@ -385,6 +393,7 @@ def _launch_challenge_impl(
             cage_run_id=cage_run_id or None,
             audience=audience,
             entry_service_keys=entry_service_keys,
+            network_only=network_only,
             challenge_id=chal_id,
         )
         failure_cleanup.callback(_unlink_runtime_compose, runtime_compose_path)
@@ -605,7 +614,15 @@ def _launch_challenge_impl(
         "cage_run_id": cage_run_id or "",
         "octet_slot": allocated_slot,
         "audience": audience,
+        # Hint tier bound to THIS instance at launch (GET /prompt reads it). Set
+        # per-launch (?prompt_level=), so different instances on one server can
+        # run at different tiers without restarting serve.
+        "prompt_level": prompt_level,
         "entry_service_keys": sorted(entry_service_keys),
+        # Wall-clock launch time (epoch seconds). Read only by the management
+        # console's ``GET /instances`` to show per-instance uptime; nothing in
+        # the trial path depends on it.
+        "created_at": time.time(),
     })
 
     entry_urls: List[EntryUrl] = []
@@ -629,4 +646,5 @@ def _launch_challenge_impl(
         debug=debug,
         services=final_services,
         entry_urls=entry_urls,
+        container_addr=build_container_addrs(final_services, entry_service_keys),
     )

@@ -21,10 +21,10 @@ WORKER=cage/cairn-worker:latest
 ENGINE=cage/cairn:latest
 
 echo "==> [1/3] engine base: ${ENGINE_BASE}"
-docker build -f docker/cairn.Dockerfile -t "${ENGINE_BASE}" .
+docker build -f docker/cairn/Dockerfile -t "${ENGINE_BASE}" .
 
 echo "==> [2/3] worker (engine + USER agent): ${WORKER}"
-docker build -f docker/cairn_worker.Dockerfile --build-arg BASE="${ENGINE_BASE}" -t "${WORKER}" .
+docker build -f docker/cairn/worker.Dockerfile --build-arg BASE="${ENGINE_BASE}" -t "${WORKER}" .
 
 echo "==> [3/3] bake worker tar into final engine: ${ENGINE}"
 tmp="$(mktemp -d)"

@@ -11,6 +11,18 @@ from cage.scoring import Score, Scorer, ScoringContext, parse_check_done_status
 class _DemoScorer(Scorer):
     name = "demo"
 
+    def __init__(self, benchmark=None) -> None:
+        # gather (the live half of scoring) now lives on the scorer. These fake
+        # benchmarks still define the per-variant evidence via ``check_done``;
+        # the scorer delegates to it, so the monitor's ``scorer().gather`` path
+        # exercises the same evidence sequences without restructuring the fakes.
+        self._benchmark = benchmark
+
+    def gather(self, runtime) -> str:
+        if not self._benchmark:
+            return ""
+        return self._benchmark.check_done(runtime.container, runtime.sample)
+
     def score(self, ctx: ScoringContext) -> dict[str, Score]:
         matched, _ = parse_check_done_status(ctx.check_done_output)
         return {"demo": Score(value=1.0 if matched else 0.0)}
@@ -27,7 +39,7 @@ class _Benchmark:
         return '{"status": "success", "message": "done"}'
 
     def scorer(self) -> Scorer:
-        return _DemoScorer()
+        return _DemoScorer(self)
 
     def live_check_triggers(self, sample):
         return [":9091", "target:9091"]

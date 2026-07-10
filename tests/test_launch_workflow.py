@@ -326,6 +326,66 @@ def _materialize(tmp_path, compose_yaml: str, runtime_patches: dict):
         )
 
 
+def test_network_only_keeps_every_service_off_the_host(tmp_path):
+    # network_only: NOTHING is host-published — the user-facing entry service
+    # (web) AND the scoring sidecar (evaluator) both get NO host port. Each is
+    # reached only over the isolated docker network at its inner address; the
+    # host-side scorer routes to the per-instance bridge directly, so the
+    # evaluator needs no 127.0.0.1 binding either.
+    from pathlib import Path
+    from cage.target.adapters.base import LaunchSpec
+    from cage.target.server.launch_runtime import materialize_compose_runtime
+    from cage.target.server.network_alloc import _release_reserved_project_local_subnets
+
+    compose_path = Path(tmp_path) / "docker-compose.yml"
+    compose_path.write_text(
+        "services:\n  web:\n    image: nginx\n  evaluator:\n    image: eval\n"
+    )
+    runtime_compose = Path(tmp_path) / ".cage_runtime" / "runtime.yml"
+    runtime_compose.parent.mkdir(parents=True, exist_ok=True)
+    port = [40000]
+
+    def find_port() -> int:
+        port[0] += 1
+        return port[0]
+
+    spec = LaunchSpec(
+        mode="compose",
+        working_directory=str(tmp_path),
+        compose_files=[str(compose_path)],
+        target_services=["web", "evaluator"],
+        dependency_services=[],
+        runtime_patches={"target_ports": {"web": 80, "evaluator": 9091}},
+        exposure_mode="host_ports",
+    )
+    _release_reserved_project_local_subnets()
+    with patch(
+        "cage.target.server.network_alloc._collect_used_docker_subnets",
+        return_value=[],
+    ):
+        plan = materialize_compose_runtime(
+            spec=spec,
+            project_name="cage_bench_test_pb_x_bbbb2222_runtime",
+            docker_network="cage_bench_test",
+            host_ip="127.0.0.1",
+            runtime_compose_path=runtime_compose,
+            find_free_port_fn=find_port,
+            existing_external_ports=None,
+            audience="external",
+            entry_service_keys={"web"},
+            network_only=True,
+            challenge_id="pb-x",
+        )
+    svcs = plan.config["services"]
+    # entry service (web): no host port at all — docker-network only
+    assert not svcs["web"].get("ports")
+    assert "web" not in plan.external_ports
+    # non-entry sidecar (evaluator): ALSO no host port — the scorer reaches it
+    # over the isolated network at its inner IP, so nothing leaks onto the host.
+    assert not svcs["evaluator"].get("ports")
+    assert "evaluator" not in plan.external_ports
+
+
 def test_default_network_mode_is_compose_project_local_with_injected_default(tmp_path):
     plan = _materialize(
         tmp_path,
@@ -697,6 +757,18 @@ def test_resolve_parallel_mode_defaults_to_network():
     # Explicit override wins
     assert resolve_parallel_mode({"benchmark_family": "agent_pentest_bench"}, "alias") == "alias"
     assert resolve_parallel_mode({"benchmark_family": "agent_pentest_bench"}, "network") == "network"
+
+
+def test_use_external_access_is_forbidden():
+    # Host-published external access is gone — agents reach targets over the
+    # isolated docker network only. Setting it true is a hard config error.
+    import pytest
+    from cage.config.experiment import _resolve_target
+
+    with pytest.raises(ValueError, match="use_external_access"):
+        _resolve_target({"target": {"use_external_access": True}})
+    # absent → fine, and resolves to the internal-only value
+    assert _resolve_target({"target": {}}).use_external_access is False
 
 
 def test_resolve_target_scope_reads_from_chal_data():

@@ -70,6 +70,32 @@ def build_network_debug(project_name: str, network_name: str, parallel_mode: str
     return debug
 
 
+def build_container_addrs(
+    services: List[ServiceInfo],
+    entry_service_keys: set[str],
+) -> List[str]:
+    """Internal ``ip:port`` of the target services ON the docker network.
+
+    The serve-only counterpart of :func:`_build_entry_urls`: instead of a
+    host-published port, each service's address as seen from INSIDE the isolated
+    network (``inner_ip:internal_port``). An external agent that has attached to
+    the docker network reaches the targets here. When entry services are declared
+    (web challenges), only those are listed — the internal parallel of
+    ``entry_urls``, which keeps scoring sidecars out. When none are declared
+    (multi-host post-exploit ranges), every service with an internal address is
+    listed so the whole topology is reachable.
+    """
+    addrs: List[str] = []
+    for svc in services:
+        if entry_service_keys and svc.service_name not in entry_service_keys:
+            continue
+        ip = str(getattr(svc, "inner_ip", "") or "").strip()
+        port = getattr(svc, "inner_port", None) or getattr(svc, "internal_port", None)
+        if ip and port:
+            addrs.append(f"{ip}:{int(port)}")
+    return addrs
+
+
 def _build_entry_urls(
     *,
     services: List[ServiceInfo],

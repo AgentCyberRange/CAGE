@@ -44,7 +44,8 @@ export default defineConfig({
         items: [
           { text: 'Contributing', link: '/developing-cage/' },
           { text: 'Writing Benchmarks', link: '/writing-benchmarks/' },
-          { text: 'Adding an Agent', link: '/adding-a-new-agent' }
+          { text: 'Adding an Agent', link: '/adding-a-new-agent' },
+          { text: 'Benchmark-Only (Serve) Mode', link: '/benchmark-serve-mode' }
         ]
       },
       {

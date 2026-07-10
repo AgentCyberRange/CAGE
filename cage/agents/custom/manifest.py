@@ -45,6 +45,31 @@ class CustomManifest:
     build: dict[str, str] = field(default_factory=dict)
 
 
+# Reserved {tokens} Cage fills (see cage/agents/custom/agent.py::_base_tokens and
+# build_launch_command). A manifest `param` may NOT reuse one of these names, nor
+# the `model.` prefix: Cage owns these cross-cutting concepts and there is exactly
+# ONE canonical way to set each — rounds via `max_rounds` / `--max-rounds`, model
+# via the model config, etc. A param that duplicates one is a second, confusing
+# knob for the same thing, so it's rejected at load time instead of silently lost.
+RESERVED_TOKEN_NAMES = frozenset({
+    "task_instruction", "model_name", "base_url", "api_key",
+    "max_rounds", "workspace_dir",
+})
+
+
+def _reject_reserved_params(params: dict[str, str], manifest_path: Path) -> None:
+    clashing = sorted(
+        k for k in params if k in RESERVED_TOKEN_NAMES or k.startswith("model.")
+    )
+    if clashing:
+        raise ValueError(
+            f"{manifest_path}: params may not reuse Cage-reserved token name(s) "
+            f"{clashing}. Cage fills these ({', '.join(sorted(RESERVED_TOKEN_NAMES))}, "
+            f"model.*) — use the reserved {{token}} directly in `command` (e.g. map "
+            f"rounds with {{max_rounds}}); keep `params` for your agent's own knobs."
+        )
+
+
 def load_manifest(source: str, base_dir: Path) -> CustomManifest:
     """Resolve ``source`` (relative to ``base_dir``) and parse its ``agent.yml``.
 
@@ -77,6 +102,9 @@ def load_manifest(source: str, base_dir: Path) -> CustomManifest:
         if not raw.get(required):
             raise ValueError(f"{manifest_path}: missing required field '{required}'")
 
+    params = {str(k): str(v) for k, v in (raw.get("params") or {}).items()}
+    _reject_reserved_params(params, manifest_path)
+
     return CustomManifest(
         source_dir=str(src),
         name=str(raw.get("name") or src.name),
@@ -86,7 +114,7 @@ def load_manifest(source: str, base_dir: Path) -> CustomManifest:
         output=_normalize_output(raw.get("output", "stdout"), manifest_path),
         env={str(k): str(v) for k, v in (raw.get("env") or {}).items()},
         state_paths=[str(p) for p in (raw.get("state_paths") or [])],
-        params={str(k): str(v) for k, v in (raw.get("params") or {}).items()},
+        params=params,
         privileged=bool(raw.get("privileged", False)),
         build={str(k): str(v) for k, v in (raw.get("build") or {}).items()},
     )

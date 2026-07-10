@@ -8,6 +8,7 @@ import logging
 import re
 import sys
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,28 @@ from cage.contracts.scoring import Score
 from cage.scoring.context import ScoringContext
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GatherRuntime:
+    """Inputs for :meth:`Scorer.gather` — how to reach the live target and the
+    agent's produced output, WITHOUT assuming an agent container exists.
+
+    - ``sample`` carries target reachability: ``runtime_state.project_name`` (to
+      docker-exec into the target's containers) and ``target_info`` (host-published
+      scoring endpoints). This is how a scorer reaches the target — never the agent.
+    - ``agent_output_dir`` is a host directory holding the agent's produced output.
+      In serve-only mode it is the unpacked submission, so a scorer reads the
+      agent's findings from here with no container. ``None`` when unavailable.
+    - ``container`` is the live agent container: present in ``cage run`` (where the
+      agent's output is not yet copied to the host at gather time) and ``None`` in
+      serve-only. A scorer uses it ONLY as the agent-output source when
+      ``agent_output_dir`` is absent — never to reach the target.
+    """
+
+    sample: dict[str, Any]
+    agent_output_dir: Path | None = None
+    container: Any = None
 
 
 class Scorer(ABC):
@@ -26,6 +49,30 @@ class Scorer(ABC):
     @abstractmethod
     def score(self, ctx: ScoringContext) -> dict[str, Score]:
         """Return named score records for the provided trial context."""
+
+    def gather(self, runtime: GatherRuntime) -> str:
+        """LIVE evidence-gathering phase — the live half of scoring.
+
+        Observe the **running target** (via ``runtime``) and return a
+        serializable evidence string that :meth:`score` later consumes (through
+        ``ctx.check_done_output`` / ``ctx.live_payload``). This is the ONLY
+        scoring step that requires the target environment to be up: an
+        implementation may ``docker exec`` into the target's containers (marker
+        checks) or hit a host-published scoring endpoint (an evaluator ``/done``).
+        It MUST run before the target is torn down; afterwards there is nothing
+        to observe.
+
+        ``runtime`` decouples this from "the agent container": the target is
+        reached via ``runtime.sample``, and the agent's produced output comes
+        from ``runtime.agent_output_dir`` (a host dir — serve-only) or, when that
+        is absent, ``runtime.container`` (cage run, before the workspace is copied
+        to the host). Verifiers that judge purely target-side state ignore both.
+
+        Formerly ``Benchmark.check_done`` — it was always the scorer's live half
+        (the live monitor already fed its output straight into ``score``), so it
+        lives on the scorer, not the benchmark. Default: no live evidence (``""``).
+        """
+        return ""
 
 
 class CompositeScorer(Scorer):

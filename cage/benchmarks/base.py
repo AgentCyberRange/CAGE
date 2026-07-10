@@ -174,13 +174,36 @@ class Benchmark(ABC):
     def teardown(self) -> None:
         """Clean up resources at the end of a run."""
 
+    def on_agent_finish(
+        self,
+        container: Container,
+        sample: dict[str, Any],
+        trial_dir: str,
+    ) -> None:
+        """Run the instant the agent stops — BEFORE the scoring gather.
+
+        The lifecycle is: setup → agent run (this is the trial's *duration*) →
+        **agent finish (here)** → gather (live scoring evidence) → trial complete
+        → offline score. This hook is where a benchmark materializes the agent's
+        produced output to the host — e.g. ``container.copy_from`` the workspace
+        to ``<trial_dir>/workspace/`` — so the live gather (and serve-only) can
+        read it from the host instead of the agent container. Runs while the
+        container is alive; the target is still up. Default: no-op.
+        """
+
     def on_trial_complete(
         self,
         container: Container,
         sample: dict[str, Any],
         trial_dir: str,
     ) -> None:
-        """Run benchmark logic while the trial container is still alive."""
+        """Run AFTER the scoring gather, container still alive (target post-mortem).
+
+        Sits after :meth:`on_agent_finish` and the gather, just before target
+        teardown — the place for last-look diagnostics (docker logs/inspect of
+        the target stack). Materializing agent output belongs in
+        :meth:`on_agent_finish`, not here (this runs too late for gather to see).
+        """
 
     def build_targets(
         self,
@@ -264,15 +287,6 @@ class Benchmark(ABC):
         if not values:
             return 0.0
         return max(0.0, min(1.0, max(values)))
-
-    def check_done(
-        self,
-        container: Container,
-        sample: dict[str, Any],
-    ) -> str:
-        """Query the benchmark's target-side check endpoint, if any."""
-
-        return ""
 
     def build_dashboard(self, run_dir: Path) -> Optional["Dashboard"]:
         """Build a benchmark-specific visualization for a finished run."""

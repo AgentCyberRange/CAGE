@@ -20,7 +20,7 @@ class CodexAgent(AgentType):
     name = "codex"
     state_paths = [".codex"]
     default_image = "pursu1ng/cage-images:codex-latest"
-    dockerfile = "docker/codex.Dockerfile"
+    dockerfile = "docker/codex/Dockerfile"
 
     def install_command(self, version: str = "latest") -> str:
         return f"npm install -g @openai/codex@{version}"

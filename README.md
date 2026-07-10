@@ -11,6 +11,11 @@ CAGE is **infrastructure** — not a benchmark, not an agent.
 Everything domain-specific (samples, prompts, live targets, scoring) lives in a
 benchmark package outside the framework.
 
+Two ways to use it: let CAGE **run and record** your agent (the default above),
+or run **benchmark-only** — CAGE serves the isolated targets and your own
+external agent drives them over an API (`list → launch → attack → submit →
+close`). See [Evaluating Your Own Agent](#evaluating-your-own-agent).
+
 ## Setup
 
 ### 0. Requirements
@@ -209,6 +214,41 @@ one of its steps. The full lifecycle is in
 [How a Run Works](docs/how-a-run-works.md).
 
 
+## Evaluating Your Own Agent
+
+There are two ways to put **your own agent** in front of a CAGE benchmark. They
+differ in one thing: **does CAGE run and record the agent, or just serve the
+targets?**
+
+- **CAGE-managed** — you plug your agent into CAGE (a Dockerfile + an `agent.yml`
+  manifest, no framework code) and `cage run` owns the whole trial: it builds the
+  container, **intercepts every LLM call** through the in-container proxy,
+  snapshots state, and scores. You get the **full step-by-step trajectory** in the
+  inspector and apples-to-apples comparability. → [Adding an Agent](docs/adding-a-new-agent.md)
+  ([中文](docs/adding-a-new-agent-CN.md)).
+
+- **Benchmark-only / serve** — `cage benchmark serve <benchmark>` exposes an
+  isolated, launchable target range, and **your agent drives the loop itself**
+  over an HTTP API / zero-dep SDK (`list → launch → attack → submit → close`).
+  **Zero integration** — any language, any framework, agent stays a black box —
+  but CAGE never sees the LLM calls, so there is **no trajectory**, only the final
+  score. Ideal for external teams, self-serve leaderboards, or agents you can't
+  containerize into CAGE. → [Benchmark-Only (Serve) Mode](docs/benchmark-serve-mode.md)
+  ([中文](docs/benchmark-serve-mode-CN.md)).
+
+| | CAGE-managed | Benchmark-only / serve |
+|---|---|---|
+| Who runs the agent | CAGE (`cage run`) | You (external process) |
+| Integration cost | Dockerfile + `agent.yml` + proxy convention | None |
+| Trajectory (every LLM / tool call) | **Captured** — full inspector view | Not captured — score/verdict only |
+| Reproducible / resumable / comparable | Yes | Weaker — you own the runtime |
+| Best for | Rigorous, recorded, comparable evaluation | External / black-box agents, leaderboards |
+
+**Rule of thumb:** want CAGE to observe, record, and rigorously compare, and you
+can containerize → CAGE-managed. Just want a score from an external agent with
+zero integration → serve mode.
+
+
 ## Included Benchmarks
 
 CAGE is benchmark-agnostic; these security benchmarks ship as example packages:
@@ -234,4 +274,5 @@ never changes.
 - [Running Experiments](docs/running-experiments/README.md) and [Operations](docs/operations/README.md) — scaling, resume, scoring, cleanup.
 - [Adding an Agent](docs/adding-a-new-agent.md) — evaluate **your own agent**: a LangGraph/LangChain graph (or any program) via an `agent.yml` manifest with **no framework code**, or a built-in Python `AgentType`.
   - [LangGraph / LangChain Agent](docs/langgraph-langchain-agent.md) — focused, hands-on walkthrough for the manifest path, built on the real `references/agentic-poc` example (manifest, proxy wiring, free node-aware tracing).
+- [Benchmark-Only (Serve) Mode](docs/benchmark-serve-mode.md) ([中文](docs/benchmark-serve-mode-CN.md)) — the other integration path: `cage benchmark serve` exposes the target range and **your external agent drives it** over the PULL API / SDK. Zero integration, but no trajectory. Full HTTP contract in [Serve External Audience](docs/serve-external-audience.md).
 - [Writing Benchmarks](docs/writing-benchmarks/README.md) and [Contributing](docs/developing-cage/README.md) — extend CAGE.

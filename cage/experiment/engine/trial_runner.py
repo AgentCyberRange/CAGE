@@ -1345,7 +1345,7 @@ def execute_trial(
             # Raw-socket tools (nmap/fscan/masscan/hping3) are made usable
             # for non-root via file capabilities baked into the Dockerfile
             # (see ``setcap cap_net_raw,cap_net_admin+eip`` block in
-            # ``docker/*_pentestenv.Dockerfile``). The agent also has a known
+            # ``docker/*/pentestenv.Dockerfile``). The agent also has a known
             # sudo password (``cage``) for rare cases that need real root —
             # the system prompt tells it so.
             proc = container.exec_async(
@@ -1519,12 +1519,26 @@ def execute_trial(
                     artifact_dir=storage.trial_proxy_dir(trial_id),
                 )
 
+        # 6.3 Agent-finish hook: the agent has stopped and the container is still
+        # alive, so materialize its output to the host (e.g. copy the workspace)
+        # BEFORE the scoring gather runs — gather then reads agent output from the
+        # host, exactly as serve-only does, instead of the live container.
+        try:
+            run.benchmark.on_agent_finish(
+                container=container,
+                sample=trial.sample,
+                trial_dir=str(storage.trial_dir(trial_id)),
+            )
+        except Exception as exc:
+            logger.warning("on_agent_finish error: %s", exc)
+
         final_evidence_path = capture_trial_check_done(
             benchmark=run.benchmark,
             container=container,
             sample=trial.sample,
             trial_dir=storage.trial_dir(trial_id),
             trial_id=trial_id,
+            agent_output_dir=storage.trial_dir(trial_id) / "workspace",
         )
         if final_evidence_path is not None:
             _mark_canonical_trial_final_evidence_artifact(

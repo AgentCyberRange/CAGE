@@ -15,7 +15,7 @@ agent.
 |---|---|---|
 | Manifest + entrypoint (our glue) | `cage/agents/custom/cairn/` (this dir) | yes (tracked) |
 | Cairn engine source (upstream) | `third_party/Cairn/` | yes — a **pinned git submodule** |
-| Trial image + worker image | `docker/cairn.Dockerfile`, `docker/cairn_worker.Dockerfile` | yes (tracked) |
+| Trial image + worker image | `docker/cairn/Dockerfile`, `docker/cairn/worker.Dockerfile` | yes (tracked) |
 
 The manifest ([`agent.yml`](agent.yml)) is manifest-driven (zero framework
 code); the orchestration is [`cairn_cage_entry.py`](cairn_cage_entry.py), copied
@@ -68,7 +68,7 @@ cage agent build --agent cairn
 Cairn's image is a 3-image bake (engine → worker → bake the worker tar into the
 final image, so the empty inner Docker daemon can `docker load` it) that a single
 `docker build` can't express. The manifest's `build:` points `cage agent build`
-at `docker/build_cairn.sh`, which runs all three steps and produces
+at `docker/cairn/build.sh`, which runs all three steps and produces
 `cage/cairn:engine`, `cage/cairn-worker:latest`, and `cage/cairn:latest` (the
 manifest uses the last). The build **needs the submodule checked out** (Step 1) —
 it copies the engine from `third_party/Cairn/`.

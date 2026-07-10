@@ -207,6 +207,22 @@ services). Each project-local network is labelled with
 `cage.target_server.role=runtime` so `cleanup_orphan_networks` can
 discard them safely without touching another namespace's networks.
 
+### Serve-only (PULL) mode
+
+The same target server also runs standalone via `cage benchmark serve
+<benchmark>`, which turns it into a browsable target range an **external** agent
+drives itself — the inverse of `cage run`, where CAGE runs the agent. The agent
+self-operates the loop over HTTP / the zero-dep `cage/target/serve_client.py`
+SDK: `GET /challenges` → `GET /launch/{chal}` (per-agent isolated instance) →
+`GET /prompt/{run_id}` (the benchmark's `build_prompt` briefing, target filled
+in) → attack → `POST /submit/{run_id}` (the benchmark scorer runs in
+`cage/target/server/submit.py`, persisting an inspectable trial under
+`.cage_runs`) → `DELETE /launch/{chal}`. CAGE never sees the agent's LLM calls,
+so there is no trajectory — only the scored verdict. This is Layer-1 clean: the
+server discovers and loads the benchmark's own scorer + `build_prompt` by path
+and never names a benchmark. See `docs/benchmark-serve-mode.md` (the guide) and
+`docs/serve-external-audience.md` (the HTTP contract).
+
 For challenges with multiple compose networks that the agent should
 choose between (post-exploit ranges with `range1_public_network` +
 sub-networks), set `agent_network` in challenge.json to the name of
