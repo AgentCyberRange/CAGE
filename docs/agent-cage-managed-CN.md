@@ -1,6 +1,6 @@
 # 把自定义Agent 接到 agent_pentest_bench 上
 
-[English](adding-a-new-agent.md) · **中文**
+[English](agent-cage-managed.md) · **中文**
 
 手把手把**你写的自定义 Agent** 接到 `agent_pentest_bench` 上,跑一个真实靶标,在
 inspector 里看它得分。下面每条命令都能照抄——benchmark、sample、model 全是真的。
@@ -13,7 +13,7 @@ inspector 里看它得分。下面每条命令都能照抄——benchmark、samp
 
 > **想要另一种模式** —— 保留你自己的 harness、让 agent 通过 API 自己拉靶场
 > (`list → launch → attack → submit → close`)、完全不接进 Cage?那是
-> [Benchmark-only(serve)模式](benchmark-serve-mode-CN.md)。代价是拿不到记录的
+> [Benchmark-only(serve)模式](agent-serve-mode-CN.md)。代价是拿不到记录的
 > trajectory,换来零集成——取舍见那篇的对比表。
 
 ## 0. 准备测试靶场环境

@@ -220,7 +220,7 @@ in) → attack → `POST /submit/{run_id}` (the benchmark scorer runs in
 `.cage_runs`) → `DELETE /launch/{chal}`. CAGE never sees the agent's LLM calls,
 so there is no trajectory — only the scored verdict. This is Layer-1 clean: the
 server discovers and loads the benchmark's own scorer + `build_prompt` by path
-and never names a benchmark. See `docs/benchmark-serve-mode.md` (the guide) and
+and never names a benchmark. See `docs/agent-serve-mode.md` (the guide) and
 `docs/serve-external-audience.md` (the HTTP contract).
 
 For challenges with multiple compose networks that the agent should

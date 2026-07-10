@@ -1,6 +1,6 @@
 # Adding a New Agent to CAGE
 
-**English** · [中文](adding-a-new-agent-CN.md)
+**English** · [中文](agent-cage-managed-CN.md)
 
 Cage evaluates an *already-built* agent. "Adding an agent" means telling Cage how
 to **launch** yours and **read back its answer** — then
@@ -15,7 +15,7 @@ writing a benchmark, and (almost always) not editing the framework.
 >
 > **Want the other model** — keep your own harness and have your agent pull
 > targets over an API (`list → launch → attack → submit → close`), with no
-> integration into Cage? That's [Benchmark-Only (Serve) Mode](benchmark-serve-mode.md).
+> integration into Cage? That's [Benchmark-Only (Serve) Mode](agent-serve-mode.md).
 > You trade the recorded trajectory for zero integration — see that doc's
 > comparison table.
 

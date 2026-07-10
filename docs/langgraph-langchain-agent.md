@@ -18,7 +18,7 @@ There are two ways to add an agent to Cage. This guide is the **custom-agent
 (manifest)** path, which is the right one for a LangGraph/LangChain agent you
 own. The other path — wrapping a third-party coding-agent *CLI* (Claude Code,
 Codex, …) as a registered `AgentType` — is heavier and lives in
-[`docs/adding-a-new-agent.md`](adding-a-new-agent.md). If you find yourself
+[`docs/agent-cage-managed.md`](agent-cage-managed.md). If you find yourself
 editing anything under `cage/` to make your LangGraph agent run, stop: the
 manifest path needs none of it.
 
@@ -374,6 +374,6 @@ already drives any manifest.
   the zero-code LangGraph trace hook.
 - [`docker/custom_langgraph/Dockerfile`](../docker/custom_langgraph/Dockerfile)
   — the runtime base recipe.
-- [`docs/adding-a-new-agent.md`](adding-a-new-agent.md) — the heavier path for
+- [`docs/agent-cage-managed.md`](agent-cage-managed.md) — the heavier path for
   wrapping a third-party agent *CLI* as a registered `AgentType`.
 ```

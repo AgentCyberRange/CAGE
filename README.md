@@ -228,8 +228,8 @@ has no observability of its own and you need CAGE to record the trajectory for y
   box. CAGE never sees the LLM calls, so there is **no trajectory**, only the final
   score — which is exactly right when your agent already keeps its own logs and UI.
   Ideal for a mature agent or framework, external teams, self-serve leaderboards,
-  or agents you can't containerize into CAGE. → [Benchmark-Only (Serve) Mode](docs/benchmark-serve-mode.md)
-  ([中文](docs/benchmark-serve-mode-CN.md)).
+  or agents you can't containerize into CAGE. → [Benchmark-Only (Serve) Mode](docs/agent-serve-mode.md)
+  ([中文](docs/agent-serve-mode-CN.md)).
 
 - **CAGE-managed** — for agents with **no frontend or observability of their own**
   — think terminal tools like **Claude Code** or **Codex**. You plug your agent
@@ -237,8 +237,8 @@ has no observability of its own and you need CAGE to record the trajectory for y
   `cage run` owns the whole trial: it builds the container, **intercepts every LLM
   call** through the in-container proxy, snapshots state, and scores — giving you
   the **full step-by-step trajectory** in the inspector and apples-to-apples
-  comparability you'd otherwise lack. → [Adding an Agent to CAGE](docs/adding-a-new-agent.md)
-  ([中文](docs/adding-a-new-agent-CN.md)).
+  comparability you'd otherwise lack. → [Adding an Agent to CAGE](docs/agent-cage-managed.md)
+  ([中文](docs/agent-cage-managed-CN.md)).
 
 | | Benchmark-only / serve *(recommended)* | CAGE-managed |
 |---|---|---|
@@ -279,7 +279,7 @@ never changes.
 - [How a Run Works](docs/how-a-run-works.md) — the run lifecycle and runtime internals.
 - [The CLI](docs/cli-design.md) — every command as a slice of `cage run`.
 - [Running Experiments](docs/running-experiments/README.md) and [Operations](docs/operations/README.md) — scaling, resume, scoring, cleanup.
-- [Adding an Agent](docs/adding-a-new-agent.md) — evaluate **your own agent**: a LangGraph/LangChain graph (or any program) via an `agent.yml` manifest with **no framework code**, or a built-in Python `AgentType`.
+- [Adding an Agent](docs/agent-cage-managed.md) — evaluate **your own agent**: a LangGraph/LangChain graph (or any program) via an `agent.yml` manifest with **no framework code**, or a built-in Python `AgentType`.
   - [LangGraph / LangChain Agent](docs/langgraph-langchain-agent.md) — focused, hands-on walkthrough for the manifest path, built on the real `references/agentic-poc` example (manifest, proxy wiring, free node-aware tracing).
-- [Benchmark-Only (Serve) Mode](docs/benchmark-serve-mode.md) ([中文](docs/benchmark-serve-mode-CN.md)) — the other integration path: `cage benchmark serve` exposes the target range and **your external agent drives it** over the PULL API / SDK. Zero integration, but no trajectory. Full HTTP contract in [Serve External Audience](docs/serve-external-audience.md).
+- [Benchmark-Only (Serve) Mode](docs/agent-serve-mode.md) ([中文](docs/agent-serve-mode-CN.md)) — the other integration path: `cage benchmark serve` exposes the target range and **your external agent drives it** over the PULL API / SDK. Zero integration, but no trajectory. Full HTTP contract in [Serve External Audience](docs/serve-external-audience.md).
 - [Writing Benchmarks](docs/writing-benchmarks/README.md) and [Contributing](docs/developing-cage/README.md) — extend CAGE.

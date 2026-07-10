@@ -1,6 +1,6 @@
 # Benchmark-Only (Serve) Mode: External-Agent-Driven Target Ranges
 
-**English** · [中文](benchmark-serve-mode-CN.md)
+**English** · [中文](agent-serve-mode-CN.md)
 
 CAGE's benchmark-only (serve) mode exposes a benchmark as a set of on-demand,
 isolated target ranges that an **external agent drives itself** over an HTTP API —
@@ -32,7 +32,7 @@ in-house agent) → **serve mode**; a new agent you want CAGE to record end-to-e
 CAGE evaluates your own agent in one of two ways; they differ in a single thing:
 **does CAGE run and record the agent, or only serve the targets?**
 
-- **CAGE-managed** — see [Adding an Agent](adding-a-new-agent.md). You plug your
+- **CAGE-managed** — see [Adding an Agent](agent-cage-managed.md). You plug your
   agent into CAGE and `cage run` owns the whole trial: it builds the container,
   **intercepts every model call** through an in-container proxy, snapshots state,
   and scores.
@@ -42,7 +42,7 @@ CAGE evaluates your own agent in one of two ways; they differ in a single thing:
 
 **Table 1. The two paths**
 
-| Dimension | Benchmark-only / serve (this doc) | CAGE-managed ([doc](adding-a-new-agent.md)) |
+| Dimension | Benchmark-only / serve (this doc) | CAGE-managed ([doc](agent-cage-managed.md)) |
 |---|---|---|
 | Who runs the agent | You (external process) | CAGE (`cage run`) |
 | Integration cost | Near zero — no Dockerfile / `agent.yml` / proxy convention | Dockerfile + `agent.yml`; your model client must call CAGE's `{base_url}` |
@@ -323,12 +323,12 @@ What the caller receives is the **verdict, not a trajectory**:
 and `judge_findings`), which is exactly what `submit` returns. Because CAGE never
 ran your agent, there is **no step-by-step LLM/tool trajectory** — the inherent
 limitation of serve mode. If you need the trajectory, use the
-[CAGE-managed path](adding-a-new-agent.md).
+[CAGE-managed path](agent-cage-managed.md).
 
 ## Reference
 
 - [Serve External Audience](serve-external-audience.md) — the full HTTP contract:
   every endpoint, the two-audience port-binding model, `--external-token` auth,
   concurrency/isolation internals, and the raw `curl` equivalents of the SDK calls.
-- [Adding an Agent](adding-a-new-agent.md) — the other path: let CAGE run and
+- [Adding an Agent](agent-cage-managed.md) — the other path: let CAGE run and
   record your agent.

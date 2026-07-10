@@ -135,9 +135,9 @@ These are non-negotiable; break one and downstream things stop working:
   layout, synchronization checklist.
 - [`docs/targets-check.md`](docs/targets-check.md) — `cage targets-check`
   guide (parallel target smoke test).
-- [`docs/benchmark-serve-mode.md`](docs/benchmark-serve-mode.md) —
+- [`docs/agent-serve-mode.md`](docs/agent-serve-mode.md) —
   benchmark-only / serve (PULL) mode: an external agent drives `cage benchmark
   serve` targets itself (list → launch → prompt → submit → close). The other
-  agent-integration path vs [`adding-a-new-agent`](docs/adding-a-new-agent.md).
+  agent-integration path vs [`agent-cage-managed`](docs/agent-cage-managed.md).
 - [`docs/serve-external-audience.md`](docs/serve-external-audience.md) —
   the serve HTTP contract: endpoints, two-audience port binding, external token.

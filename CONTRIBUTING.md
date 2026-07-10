@@ -33,7 +33,7 @@ keys. Never commit it; only `config/models.example.yml` (placeholders) is tracke
   `cage/`. See [`docs/writing-benchmarks/`](docs/writing-benchmarks/).
 - **Adding an agent** → new `cage/agents/<name>/` package + a `docker/`
   image + one import line in `cage/agents/__init__.py`. See
-  [`docs/adding-a-new-agent.md`](docs/adding-a-new-agent.md).
+  [`docs/agent-cage-managed.md`](docs/agent-cage-managed.md).
 - **Touching the framework** → apply the layer test in `CLAUDE.md` first.
 
 Keep agent-facing text (prompts, READMEs, scoring scripts) as plain files under

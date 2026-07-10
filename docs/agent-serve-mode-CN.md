@@ -1,6 +1,6 @@
 # CAGE 拉取式(serve)评测模式:外部 Agent 自驱动的靶场接入
 
-[English](benchmark-serve-mode.md) · **中文**
+[English](agent-serve-mode.md) · **中文**
 
 CAGE 的 benchmark-only(serve)模式把一个 benchmark 暴露成一组按需实例化的隔离靶场,由**外部 agent 自己驱动** `list → launch → attack → submit → close` 这条回路;CAGE 不托管 agent 运行时,也不拦截其模型调用。相比集成式(CAGE 接管,`cage run`),serve 模式放弃轨迹采集、换来近乎零集成,适合外部、黑盒或异构语言实现的 agent,以及自助评测与打榜。
 
@@ -18,12 +18,12 @@ CAGE 的 benchmark-only(serve)模式把一个 benchmark 暴露成一组按需实
 
 CAGE 支持以两种范式评测自研 Agent,二者的本质差异在于 **CAGE 是否托管并记录 Agent 的执行过程**。
 
-- **集成式(CAGE 接管)**,详见[《接入自定义 Agent》](adding-a-new-agent-CN.md)。调用方将 Agent 以容器形式接入 CAGE,由 `cage run` 统一编排整条 trial:构建容器、经容器内代理(proxy)**拦截每一次模型调用**、执行前后状态快照、并完成判分。
+- **集成式(CAGE 接管)**,详见[《接入自定义 Agent》](agent-cage-managed-CN.md)。调用方将 Agent 以容器形式接入 CAGE,由 `cage run` 统一编排整条 trial:构建容器、经容器内代理(proxy)**拦截每一次模型调用**、执行前后状态快照、并完成判分。
 - **拉取式(benchmark-only / serve,本文)**。CAGE 仅提供可实例化的隔离靶场,评测回路由**外部 Agent 自行驱动**。CAGE 不运行该 Agent,因而无法观测其模型调用。
 
 **表 1** 两种范式的对比
 
-| 维度 | 拉取式 / serve(本文) | 集成式 / CAGE 接管([文档](adding-a-new-agent-CN.md)) |
+| 维度 | 拉取式 / serve(本文) | 集成式 / CAGE 接管([文档](agent-cage-managed-CN.md)) |
 |---|---|---|
 | Agent 执行方 | 外部进程(调用方) | CAGE(`cage run`) |
 | 集成成本 | 近乎为零:无需 Dockerfile / `agent.yml` / proxy 约定 | 需 Dockerfile 与 `agent.yml`,且模型客户端须指向 CAGE 提供的 `{base_url}` |
@@ -210,9 +210,9 @@ SDK 各调用(`list_challenges` / `launch` / `session` / `task_prompt` / `attach
 
 每次 submit 将作为一条 trial 持久化至 `.cage_runs/serve__<client_id>/serve/`——即 **inspector 所读取的同一 `.cage_runs` 目录树**,故 `cage inspect` 会将其与 `cage run` 的结果并列展示。就语义而言,一次被服务的 benchmark 对应"每个外部 Agent 一个实验"(不同 `client_id` 各自拥有独立的评测 run),每次 submit 向其追加一条 trial。
 
-调用方获得的是**判定(verdict)而非轨迹(trajectory)**:`trials/<id>/scores/<scorer>.json` 载有完整判分细节(逐漏洞的 `passed` / `verifier_status` / `judge_status`,以及原始的 `verifier_results` 与 `judge_findings`),`submit` 的返回值即为同一份数据。由于 CAGE 从未运行该 Agent,故**不存在逐步的 LLM / 工具调用轨迹**——此为 serve 模式的固有局限。如需轨迹,应改用[集成式](adding-a-new-agent-CN.md)。
+调用方获得的是**判定(verdict)而非轨迹(trajectory)**:`trials/<id>/scores/<scorer>.json` 载有完整判分细节(逐漏洞的 `passed` / `verifier_status` / `judge_status`,以及原始的 `verifier_results` 与 `judge_findings`),`submit` 的返回值即为同一份数据。由于 CAGE 从未运行该 Agent,故**不存在逐步的 LLM / 工具调用轨迹**——此为 serve 模式的固有局限。如需轨迹,应改用[集成式](agent-cage-managed-CN.md)。
 
 ## 参考
 
 - [Serve External Audience](serve-external-audience.md)——完整 HTTP 契约:各端点定义、两类 audience 的端口绑定模型、`--external-token` 鉴权、并发与隔离的内部机制,以及 SDK 各调用对应的原始 `curl` 形式。
-- [《接入自定义 Agent》](adding-a-new-agent-CN.md)——另一范式:由 CAGE 运行并记录 Agent。
+- [《接入自定义 Agent》](agent-cage-managed-CN.md)——另一范式:由 CAGE 运行并记录 Agent。

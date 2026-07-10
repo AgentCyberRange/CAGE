@@ -62,7 +62,7 @@ slice of `cage run`" — are unpacked in [How a Run Works](/how-a-run-works) and
 | See how every command maps to `cage run` | [The CLI](/cli-design) |
 | Get benchmark datasets | [Datasets](/datasets) |
 | Add or maintain a benchmark | [Writing Benchmarks](/writing-benchmarks/) |
-| Wrap a new agent CLI | [Adding an Agent](/adding-a-new-agent) |
+| Wrap a new agent CLI | [Adding an Agent](/agent-cage-managed) |
 | Operate long runs on a shared host | [Operations](/operations/) |
 
 ## Benchmarks

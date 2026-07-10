@@ -111,7 +111,7 @@ cage agent debug --agent codex --model gpt-5.5     # interactive shell, no bench
 
 `agent debug` is the container/proxy half of a run with the benchmark removed —
 ideal for confirming a new agent's launch command and env before a real run. See
-[Adding an Agent](/adding-a-new-agent).
+[Adding an Agent](/agent-cage-managed).
 
 ## `cage model` — the registry a run reads
 

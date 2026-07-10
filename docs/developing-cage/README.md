@@ -23,7 +23,7 @@ for the full three-layer boundary.
 
 | I want to... | Start here |
 |---|---|
-| Add an agent CLI | [Adding an Agent](../adding-a-new-agent.md) |
+| Add an agent CLI | [Adding an Agent](../agent-cage-managed.md) |
 | Add or maintain a benchmark | [Writing Benchmarks](../writing-benchmarks/) |
 | Change the trial lifecycle | [Architecture › Runtime Flow](../repo-architecture.md#runtime-flow) — keep `conductor.py` and `trial_runner.py` in sync |
 | Change model egress / budgets | [Architecture › Proxy Runtime](../repo-architecture.md#proxy-runtime) — prefer `proxy/sidecar.py` (in-container, httpx-only) over `proxy/host.py` |
@@ -72,6 +72,6 @@ README.
 ## Related Docs
 
 - [Architecture](../repo-architecture.md) — the full system map
-- [Writing Benchmarks](../writing-benchmarks/) and [Adding an Agent](../adding-a-new-agent.md)
+- [Writing Benchmarks](../writing-benchmarks/) and [Adding an Agent](../agent-cage-managed.md)
 - [Core Classes](../reference/classes.md) — the ABCs you will subclass
 - [Operations](../operations/) — running CAGE at scale
