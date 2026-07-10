@@ -246,10 +246,16 @@ def target_runtime_args(
     parallel_mode = str(run.target.parallel_mode or "").strip()
     if parallel_mode:
         args["parallel_mode"] = parallel_mode
+    network_mode = str(run.target.network_mode or "").strip()
+    if network_mode:
+        args["network_mode"] = network_mode
+    exposure_mode = str(run.target.exposure_mode or "").strip()
+    if exposure_mode:
+        args["exposure_mode"] = exposure_mode
     if sample is not None:
         per_sample = sample.get(SAMPLE_RUNTIME_ARGS_KEY)
         if isinstance(per_sample, dict):
-            for key in ("target_scope", "parallel_mode"):
+            for key in ("target_scope", "parallel_mode", "network_mode", "exposure_mode"):
                 value = str(per_sample.get(key, "") or "").strip()
                 if value:
                     args[key] = value

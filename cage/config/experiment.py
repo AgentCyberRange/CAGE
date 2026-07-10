@@ -417,6 +417,8 @@ def _resolve_target(raw: dict[str, Any]) -> TargetConfig:
         ),
         target_scope=str(target_raw.get("target_scope", "per_agent") or ""),
         parallel_mode=str(target_raw.get("parallel_mode", "") or ""),
+        network_mode=str(target_raw.get("network_mode", "") or ""),
+        exposure_mode=str(target_raw.get("exposure_mode", "") or ""),
         agent_network_isolation=str(
             target_raw.get("agent_network_isolation", "per_trial_bridge")
             or "per_trial_bridge"

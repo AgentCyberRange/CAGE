@@ -287,11 +287,47 @@ def resolve_server_target_scope(meta: Dict[str, Any], requested_target_scope: Op
     return resolve_target_scope(chal_data=meta, runtime_args={})
 
 
+def resolve_network_mode(meta: Dict[str, Any], requested_network_mode: Optional[str]) -> str:
+    """Resolve compose ``network_mode`` with challenge-wins precedence.
+
+    A ``network_mode`` declared in challenge.json is intrinsic to whether the
+    challenge's topology works, so it wins. Only when the challenge is silent
+    does the experiment-level value (``requested``, passed by the client from
+    ``project.yml`` / CLI) apply. Empty result = let
+    ``materialize_compose_runtime`` pick its own default
+    (``compose_project_local``). This is the mirror image of
+    ``resolve_server_target_scope`` (where the per-run request wins) on purpose.
+    """
+    declared = str((meta.get("source_fields", {}) or {}).get("network_mode", "") or "").strip()
+    if declared:
+        return declared
+    return str(requested_network_mode or "").strip()
+
+
+def resolve_exposure_mode(meta: Dict[str, Any], requested_exposure_mode: Optional[str]) -> str:
+    """Resolve service ``exposure_mode`` with challenge-wins precedence.
+
+    Same rule as :func:`resolve_network_mode`: challenge.json wins, else the
+    experiment value, else the ``host_ports`` default. Independent of
+    ``network_only`` — this states the *intended* exposure; ``network_only``
+    is the per-launch gate that can additionally suppress host publishing.
+    """
+    declared = str((meta.get("source_fields", {}) or {}).get("exposure_mode", "") or "").strip()
+    if declared:
+        return declared
+    requested = str(requested_exposure_mode or "").strip()
+    if requested:
+        return requested
+    return "host_ports"
+
+
 def _launch_challenge_impl(
     chal_id: str,
     force_recreate: bool,
     parallel_mode: Optional[str] = None,
     target_scope: Optional[str] = None,
+    network_mode: Optional[str] = None,
+    exposure_mode: Optional[str] = None,
     cage_run_id: Optional[str] = None,
     audience: str = "internal",
     network_only: bool = False,
@@ -347,6 +383,14 @@ def _launch_challenge_impl(
     launch_spec = adapter.build_launch_spec(meta)
     launch_spec.runtime_patches["parallel_mode"] = effective_parallel_mode
     launch_spec.runtime_patches["target_scope"] = effective_target_scope
+    # Compose launch mode + exposure: challenge.json wins, else experiment
+    # (project.yml/CLI) value, else the framework default. Both flow through the
+    # mutable runtime_patches dict (LaunchSpec is frozen) so materialize reads
+    # the resolved values.
+    effective_network_mode = resolve_network_mode(meta, network_mode)
+    if effective_network_mode:
+        launch_spec.runtime_patches["network_mode"] = effective_network_mode
+    launch_spec.runtime_patches["exposure_mode"] = resolve_exposure_mode(meta, exposure_mode)
     chal_path = Path(launch_spec.working_directory)
 
     if launch_spec.mode == "static":

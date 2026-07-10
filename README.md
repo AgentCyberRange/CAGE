@@ -216,37 +216,44 @@ one of its steps. The full lifecycle is in
 
 ## Evaluating Your Own Agent
 
-There are two ways to put **your own agent** in front of a CAGE benchmark. They
-differ in one thing: **does CAGE run and record the agent, or just serve the
-targets?**
+Two ways to put **your own agent** in front of a CAGE benchmark, differing in one
+thing: **does CAGE run and record the agent, or just serve the targets?** **Most
+users should start with serve mode**; reach for CAGE-managed only when your agent
+has no observability of its own and you need CAGE to record the trajectory for you.
 
-- **CAGE-managed** — you plug your agent into CAGE (a Dockerfile + an `agent.yml`
-  manifest, no framework code) and `cage run` owns the whole trial: it builds the
-  container, **intercepts every LLM call** through the in-container proxy,
-  snapshots state, and scores. You get the **full step-by-step trajectory** in the
-  inspector and apples-to-apples comparability. → [Adding an Agent](docs/adding-a-new-agent.md)
-  ([中文](docs/adding-a-new-agent-CN.md)).
-
-- **Benchmark-only / serve** — `cage benchmark serve <benchmark>` exposes an
-  isolated, launchable target range, and **your agent drives the loop itself**
-  over an HTTP API / zero-dep SDK (`list → launch → attack → submit → close`).
-  **Zero integration** — any language, any framework, agent stays a black box —
-  but CAGE never sees the LLM calls, so there is **no trajectory**, only the final
-  score. Ideal for external teams, self-serve leaderboards, or agents you can't
-  containerize into CAGE. → [Benchmark-Only (Serve) Mode](docs/benchmark-serve-mode.md)
+- **Benchmark-only / serve** *(recommended)* — `cage benchmark serve <benchmark>`
+  exposes an isolated, launchable target range, and **your agent drives the loop
+  itself** over an HTTP API / zero-dep SDK (`list → launch → attack → submit →
+  close`). **Zero integration** — any language, any framework, agent stays a black
+  box. CAGE never sees the LLM calls, so there is **no trajectory**, only the final
+  score — which is exactly right when your agent already keeps its own logs and UI.
+  Ideal for a mature agent or framework, external teams, self-serve leaderboards,
+  or agents you can't containerize into CAGE. → [Benchmark-Only (Serve) Mode](docs/benchmark-serve-mode.md)
   ([中文](docs/benchmark-serve-mode-CN.md)).
 
-| | CAGE-managed | Benchmark-only / serve |
-|---|---|---|
-| Who runs the agent | CAGE (`cage run`) | You (external process) |
-| Integration cost | Dockerfile + `agent.yml` + proxy convention | None |
-| Trajectory (every LLM / tool call) | **Captured** — full inspector view | Not captured — score/verdict only |
-| Reproducible / resumable / comparable | Yes | Weaker — you own the runtime |
-| Best for | Rigorous, recorded, comparable evaluation | External / black-box agents, leaderboards |
+- **CAGE-managed** — for agents with **no frontend or observability of their own**
+  — think terminal tools like **Claude Code** or **Codex**. You plug your agent
+  into CAGE (a Dockerfile + an `agent.yml` manifest, no framework code) and
+  `cage run` owns the whole trial: it builds the container, **intercepts every LLM
+  call** through the in-container proxy, snapshots state, and scores — giving you
+  the **full step-by-step trajectory** in the inspector and apples-to-apples
+  comparability you'd otherwise lack. → [Adding an Agent to CAGE](docs/adding-a-new-agent.md)
+  ([中文](docs/adding-a-new-agent-CN.md)).
 
-**Rule of thumb:** want CAGE to observe, record, and rigorously compare, and you
-can containerize → CAGE-managed. Just want a score from an external agent with
-zero integration → serve mode.
+| | Benchmark-only / serve *(recommended)* | CAGE-managed |
+|---|---|---|
+| Who runs the agent | You (external process) | CAGE (`cage run`) |
+| Integration cost | None | Dockerfile + `agent.yml` + proxy convention |
+| Trajectory (every LLM / tool call) | Not captured — score/verdict only | **Captured** — full inspector view |
+| Reproducible / resumable / comparable | Weaker — you own the runtime | Yes |
+| Best for | A mature agent / framework with its own logging + UI; external / black-box agents; leaderboards | A terminal tool (Claude Code, Codex, …) with no UI of its own that you want CAGE to record end-to-end |
+
+**Quick check:** if your agent already has its own mature logging and a UI for
+inspecting runs, use **serve mode** — CAGE-managed's main value is recording the
+trajectory in CAGE's inspector, so if you already have that, its container/proxy
+integration is just overhead. Reach for **CAGE-managed** when your agent is a
+terminal tool with no observability of its own and you want CAGE to capture and
+standardize the trajectory for you.
 
 
 ## Included Benchmarks

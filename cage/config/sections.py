@@ -82,6 +82,16 @@ class TargetConfig:
     #                | "alias"      (agents share a network, route by alias)
     target_scope: str = "per_agent"
     parallel_mode: str = ""
+    # Compose launch mode + service exposure, experiment-level defaults.
+    # Empty = unset: a challenge.json that declares ``network_mode`` /
+    # ``exposure_mode`` always wins (the topology may be intrinsic to whether
+    # the challenge runs); only when the challenge is silent does this value
+    # apply; otherwise the server picks its own default (``compose_project_local``
+    # / ``host_ports``).
+    #   network_mode:  "" | "compose_project_local" | "shared_external"
+    #   exposure_mode: "" | "host_ports" | "internal"
+    network_mode: str = ""
+    exposure_mode: str = ""
     # Network-namespace isolation between the agent container and the
     # challenge's *internal* services (databases, secrets initialisers,
     # caches, …).

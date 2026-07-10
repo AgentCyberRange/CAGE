@@ -10,6 +10,23 @@ integrated path (CAGE-managed, `cage run`), serve mode trades away trajectory
 capture for near-zero integration, which fits external, black-box, or non-Python
 agents and self-serve evaluation / leaderboards.
 
+## Which mode fits you? (quick check)
+
+**If your agent already has its own mature logging and a frontend for inspecting
+runs, benchmark-only (serve) mode is the better fit.** CAGE-managed's main value
+is capturing the trajectory and replaying it in CAGE's own inspector; if you
+already have that, wrapping your agent in CAGE's container + proxy convention is
+pure overhead — point your existing agent at the served range and keep recording
+your own way.
+
+Conversely, take on the more involved CAGE-managed integration only when you want
+**CAGE to capture and standardize the trajectory for you** — typically a new
+agent with no observability of its own.
+
+In short: a mature agent or framework (LangGraph, an existing harness, your team's
+in-house agent) → **serve mode**; a new agent you want CAGE to record end-to-end
+→ CAGE-managed.
+
 ## Two integration paths
 
 CAGE evaluates your own agent in one of two ways; they differ in a single thing:

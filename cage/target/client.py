@@ -404,6 +404,12 @@ class RemoteBackend(BackendStrategy):
         target_scope = normalize_target_scope((runtime_args or {}).get("target_scope"))
         if target_scope:
             params["target_scope"] = target_scope
+        network_mode = str((runtime_args or {}).get("network_mode", "") or "").strip().lower()
+        if network_mode:
+            params["network_mode"] = network_mode
+        exposure_mode = str((runtime_args or {}).get("exposure_mode", "") or "").strip().lower()
+        if exposure_mode:
+            params["exposure_mode"] = exposure_mode
         if self.config.cage_run_id:
             params["cage_run_id"] = self.config.cage_run_id
         if not params:

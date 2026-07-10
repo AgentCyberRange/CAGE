@@ -2,9 +2,15 @@
 
 [English](benchmark-serve-mode.md) · **中文**
 
-**摘要**——本文介绍 CAGE 的 benchmark-only(serve)评测模式。该模式下,CAGE 仅以服务形式对外提供可按需实例化的隔离靶场,由外部 Agent 经 HTTP 接口自主驱动"枚举—开靶—攻击—提交—回收"(`list → launch → attack → submit → close`)的完整评测回路;CAGE 不托管 Agent 运行时,亦不拦截其模型调用。与集成式(CAGE 接管,`cage run`)相比,本模式以放弃执行轨迹(trajectory)的采集为代价,换取近乎为零的集成成本,适用于外部、黑盒或异构语言实现的 Agent,以及自助式评测与排行等场景。
+CAGE 的 benchmark-only(serve)模式把一个 benchmark 暴露成一组按需实例化的隔离靶场,由**外部 agent 自己驱动** `list → launch → attack → submit → close` 这条回路;CAGE 不托管 agent 运行时,也不拦截其模型调用。相比集成式(CAGE 接管,`cage run`),serve 模式放弃轨迹采集、换来近乎零集成,适合外部、黑盒或异构语言实现的 agent,以及自助评测与打榜。
 
-**关键词**:拉取式评测;靶场隔离;反作弊;任务简报;终局提交
+## 哪种模式适合你?(快速判断)
+
+**如果你的 agent 已经有自己成熟的日志系统和查看运行的前端,那 benchmark-only(serve)模式更适合你。** CAGE 接管模式的核心价值就是把执行轨迹采集下来、在 CAGE 自带的 inspector 里回放;你若已经有这套,再把 agent 塞进 CAGE 的容器 + proxy 约定纯属额外负担——直接让现成的 agent 去打服务出来的靶场,按你自己的方式记录即可。
+
+反过来,只有当你**希望由 CAGE 替你采集并标准化轨迹**(通常是还没有自己观测体系的新 agent)时,才值得去做 CAGE 接管那条更繁琐的集成。
+
+一句话:成熟 agent / 框架(LangGraph、已有 harness、团队自研 agent)→ **serve 模式**;想让 CAGE 端到端记录的新 agent → CAGE 接管。
 
 ---
 

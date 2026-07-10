@@ -149,6 +149,13 @@ def materialize_compose_runtime(
         raise ValueError(f"Cannot materialize non-compose launch spec: {spec.mode}")
 
     compose_env = dict(spec.runtime_patches.get("compose_env", {}) or {})
+    # exposure_mode may be overridden per-launch via runtime_patches (experiment
+    # default, resolved with challenge-wins precedence in _launch_challenge_impl);
+    # fall back to the LaunchSpec field, then the host_ports default. This is the
+    # declared intent; ``network_only`` can still suppress host publishing on top.
+    resolved_exposure_mode = str(
+        spec.runtime_patches.get("exposure_mode") or spec.exposure_mode or "host_ports"
+    ).strip().lower()
     config = load_compose_stack(spec.compose_files, compose_env=compose_env)
     config = expand_compose_env_values(config, compose_env)
     project_directory = _compose_project_directory(spec)
@@ -310,7 +317,7 @@ def materialize_compose_runtime(
                 protocol = parse_port_protocol(original_ports[0]) or "tcp"
 
         _entry_keys = entry_service_keys or set()
-        if network_only and spec.exposure_mode == "host_ports":
+        if network_only and resolved_exposure_mode == "host_ports":
             # network_only: NOTHING is host-published — every service (the
             # user-facing entry target AND scoring sidecars like ``evaluator``)
             # is reachable only over the isolated docker network at its internal
@@ -322,7 +329,7 @@ def materialize_compose_runtime(
             # address). This keeps the isolation promise total — no part of an
             # instance leaks onto the host.
             service_config.pop("ports", None)
-        elif spec.exposure_mode == "host_ports" and internal_port is not None:
+        elif resolved_exposure_mode == "host_ports" and internal_port is not None:
             external_port = existing_external_ports.get(service_name) or find_free_port_fn()
             port_suffix = f"/{protocol}" if protocol != "tcp" else ""
             bind_ip = _resolve_publish_bind_ip(
