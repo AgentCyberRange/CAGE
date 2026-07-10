@@ -221,7 +221,7 @@ thing: **does CAGE run and record the agent, or just serve the targets?** **Most
 users should start with serve mode**; reach for CAGE-managed only when your agent
 has no observability of its own and you need CAGE to record the trajectory for you.
 
-- **Benchmark-only / serve** *(recommended)* — `cage benchmark serve <benchmark>`
+- **Benchmark-only / serve** — `cage benchmark serve <benchmark>`
   exposes an isolated, launchable target range, and **your agent drives the loop
   itself** over an HTTP API / zero-dep SDK (`list → launch → attack → submit →
   close`). **Zero integration** — any language, any framework, agent stays a black
