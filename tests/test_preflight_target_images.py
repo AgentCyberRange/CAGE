@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import pytest
 
 from cage.experiment.engine import preflight
 from cage.experiment.engine.preflight import PreflightResult, _check_target_images

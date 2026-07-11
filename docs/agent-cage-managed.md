@@ -50,7 +50,7 @@ Use this for **your own** agent — anything you start with a shell command that
 reads a prompt, talks to a model, and prints an answer. You write **zero**
 framework code: one generic interpreter drives any agent from its `agent.yml`.
 
-**Real examples in this repo:** [`cage/agents/custom/cairn/`](../cage/agents/custom/cairn/README.md)
+**Real examples in this repo:** [`cage/agents/custom/cairn/`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/cairn/README.md)
 (a manifest agent with its own image) and the LangGraph walkthrough in
 [`langgraph-langchain-agent.md`](langgraph-langchain-agent.md).
 

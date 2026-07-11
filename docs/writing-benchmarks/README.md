@@ -88,10 +88,14 @@ Optional hooks:
 |---|---|
 | `setup()` | Load data, start benchmark-level services |
 | `teardown()` | Clean benchmark-level services |
-| `on_trial_complete()` | Copy agent files, run verifiers while container is alive |
-| `check_done()` | Query target-side success endpoint |
+| `on_agent_finish()` | Runs the instant the agent stops, **before** the scoring gather — materialize agent output to the host (e.g. `container.copy_from` the workspace) so gather and serve-only scoring can read it |
+| `on_trial_complete()` | Runs **after** the gather, target still alive — target post-mortem only (docker logs/inspect); too late to feed gather |
 | `build_dashboard()` | Emit benchmark-owned dashboard sections |
 | live-check hooks | Customize mid-trial success confirmation |
+
+Live scoring evidence is no longer a benchmark hook — it moved to the scorer's
+`gather()` (see [Scoring](#scoring)). Order per trial:
+`on_agent_finish()` → `Scorer.gather()` → `on_trial_complete()`.
 
 ## Samples
 
@@ -171,11 +175,12 @@ cage benchmark build <benchmark_id> --sample <sample_id>
 
 ## Scoring
 
-Create a `Scorer`:
+Scoring lives on the **`Scorer`**, not the benchmark. A benchmark exposes
+`scorer()`; the scorer has two methods: `score()` (the offline verdict) and
+`gather()` (the live evidence-gathering half). Create a `Scorer`:
 
 ```python
-from cage.scoring import Scorer, ScoringContext
-from cage.scoring import Score
+from cage.scoring import Scorer, ScoringContext, Score
 
 
 class MyScorer(Scorer):
@@ -191,15 +196,65 @@ class MyScorer(Scorer):
         }
 ```
 
-Scorers can read:
+CAGE calls the **same** `score()` in three situations: once right after the
+trial, again if you re-run `cage score` later, and — if your benchmark checks
+for success while the trial is still running — during the trial too. Because one
+method has to serve all three, keep it **pure**: it only reads evidence already
+saved on `ctx` and returns a verdict; it must not reach out to a target (by
+`cage score` time the target is long gone). `ScoringContext` (defined in
+`cage/scoring/context.py`) gives you:
 
-- `ctx.output`;
-- `ctx.sample`;
-- `ctx.prompt`;
-- `ctx.proxy_log`;
-- `ctx.check_done_output`;
+- `ctx.output` — the agent's final answer text;
+- `ctx.sample` — the sample dict you yielded from `iter_samples()`;
+- `ctx.prompt` — the prompt the agent received;
+- `ctx.proxy_log` — every LLM request/response the agent made during the trial;
+- `ctx.check_done_output` — evidence your `gather()` collected from the live
+  target (see below); `""` if you don't use `gather()`;
+- `ctx.live_payload` / `ctx.live_success` — a success verdict recorded while the
+  trial was still running, if your benchmark records one;
 - `ctx.metadata`;
 - files under `ctx.trial_dir`.
+
+### Live evidence: `Scorer.gather`
+
+Some benchmarks can only judge success by looking at the **running target** —
+e.g. confirming a file appeared inside a target container, or that a service now
+answers. `score()` can't do that, because it may run long after the target is
+torn down. Put that check in `gather()` instead: CAGE calls it while the target
+is still up, you return any string you like as evidence, and CAGE saves it so a
+later `score()` can read it back from `ctx.check_done_output`. If you don't need
+to inspect a live target, don't override `gather()` — the default returns `""`.
+
+```python
+from cage.scoring import GatherRuntime
+
+    def gather(self, runtime: GatherRuntime) -> str:
+        # e.g. docker-exec the target to check a success marker,
+        # or query a scoring endpoint the target itself exposes
+        return check_target_marker(runtime.sample)
+```
+
+`gather()` is handed a `GatherRuntime` (not the agent container), so it can only
+reach the *target*:
+
+- `runtime.sample` — how to reach the target (its docker-compose project and any
+  endpoints it publishes);
+- `runtime.agent_output_dir` — a host directory holding the agent's produced
+  files, when CAGE has them on disk; `None` otherwise;
+- `runtime.container` — the live agent container; set only when CAGE runs the
+  agent itself (`cage run`), and `None` when it doesn't.
+
+That last point matters in one case: when CAGE only *serves* the target and an
+outside agent drives it (the [serve mode](/agent-serve-mode) path), there is no
+agent container, so `runtime.container` is `None` and scoring works entirely off
+`runtime.agent_output_dir`.
+
+### Scoring signals
+
+A vuln/task may require multiple named signals — a scorer emits a `Score` per
+signal. Two are conventional: **`verifier`** (an evaluator `verify.py` verdict)
+and **`LLM_judge`** (a model call). Compose them by returning several named
+`Score`s (or via `CompositeScorer`).
 
 For offline scoring:
 
@@ -214,7 +269,7 @@ For an unregistered local benchmark, pass the project YAML path instead.
 Benchmarks should expose domain meaning through `build_dashboard()`:
 
 ```python
-from cage.artifacts.dashboard import Column, Dashboard, Section, Stat
+from cage.artifacts import Column, Dashboard, Section, Stat
 
 
 def build_dashboard(self, run_dir):

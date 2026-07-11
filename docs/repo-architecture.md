@@ -63,11 +63,17 @@ cage run project.yml
          9. build prompt
         10. start live-success monitors
         11. execute agent CLI
-        12. stop proxy and collect logs
-        13. snapshot post-state
-        14. collect runtime artifacts
-        15. score benchmark output, preferring live-success verdicts
-        16. cleanup submit service, target network, and target stack
+        12. Benchmark.on_agent_finish() — materialize agent output to the host
+            (pre-gather, container + target still alive)
+        13. Scorer.gather(GatherRuntime) — collect live target evidence
+            -> runtime/check_done_output.txt
+        14. Benchmark.on_trial_complete() — target post-mortem diagnostics
+            (post-gather, before teardown)
+        15. stop proxy and collect logs
+        16. snapshot post-state
+        17. collect runtime artifacts
+        18. Scorer.score(ctx), preferring live-success verdicts
+        19. cleanup submit service, target network, and target stack
 ```
 
 When `agents[].max_concurrent > 1`, CAGE uses `_run_trial_isolated()` so
@@ -192,7 +198,10 @@ AutoPenBench use CAGE's in-container `submit` service when enabled.
 Independent of the agent-facing exposure styles above, every launched
 target instance lives on one of two Docker network topologies. This is
 controlled by `network_mode` in challenge.json (or the adapter's
-`runtime_patches`):
+`runtime_patches`). The `target.network_mode` / `target.exposure_mode` config
+fields (`TargetConfig`, `cage/config/sections.py`) are only defaults: a
+challenge.json that declares either always wins, because the topology can be
+intrinsic to whether a target functions at all.
 
 | Mode | Default? | Behavior |
 | --- | --- | --- |
@@ -209,8 +218,8 @@ discard them safely without touching another namespace's networks.
 
 ### Serve-only (PULL) mode
 
-The same target server also runs standalone via `cage benchmark serve
-<benchmark>`, which turns it into a browsable target range an **external** agent
+The same target server also runs standalone via `cage benchmark serve <benchmark>`,
+which turns it into a browsable target range an **external** agent
 drives itself — the inverse of `cage run`, where CAGE runs the agent. The agent
 self-operates the loop over HTTP / the zero-dep `cage/target/serve_client.py`
 SDK: `GET /challenges` → `GET /launch/{chal}` (per-agent isolated instance) →
@@ -222,6 +231,13 @@ so there is no trajectory — only the scored verdict. This is Layer-1 clean: th
 server discovers and loads the benchmark's own scorer + `build_prompt` by path
 and never names a benchmark. See `docs/agent-serve-mode.md` (the guide) and
 `docs/serve-external-audience.md` (the HTTP contract).
+
+`cage benchmark serve` takes `--judge-model` to override the model backing a
+benchmark's `LLM_judge` scoring signal (default: the benchmark's own declared
+judge); marker-only ranges need no model. `--prompt-level {l0|l1|l2}` sets the
+default hint tier for the `GET /prompt` briefing, but the effective tier is bound
+per instance at launch (`GET /launch?prompt_level=`), so it can vary without
+restarting the server.
 
 For challenges with multiple compose networks that the agent should
 choose between (post-exploit ranges with `range1_public_network` +
@@ -388,15 +404,41 @@ fallbacks. A successful verdict has:
 The shared helpers live in `cage/artifacts/live_success.py`. Runtime monitors live
 in `cage/experiment/engine/live/monitor.py`.
 
+### Scoring split: `Scorer.gather` vs `Scorer.score`
+
+Scoring is two-phase, both halves owned by the `Scorer` (`cage/scoring/scorer.py`):
+
+- **`gather(runtime: GatherRuntime) -> str`** is the *live* half — it runs while
+  the target is still up (from a live monitor, or once at trial end) and returns a
+  serializable evidence string. It is the only scoring step that needs the target
+  environment alive: it may `docker exec` into a target container (marker checks)
+  or hit a host-published scoring endpoint. It lives on the scorer (not the
+  benchmark) because the live monitor feeds its output straight into `score()`.
+- **`score(ctx: ScoringContext) -> dict[str, Score]`** is the *offline* half — a
+  pure function of on-disk artifacts. It reads the gathered evidence back through
+  `ctx.check_done_output` / `ctx.live_payload` and prefers `live_success.json`
+  over text extraction. Being pure is what lets one scorer run identically at all
+  three call sites (inline post-trial, live monitor, offline `cage score`).
+
+`GatherRuntime` decouples gathering from "the agent container": the target is
+reached via `runtime.sample` (project name + host scoring endpoints), and the
+agent's produced output comes from `runtime.agent_output_dir` (a host dir, in
+serve-only mode) or, when absent, `runtime.container` (under `cage run`, before
+the workspace is copied to the host). This is what enables serve-only scoring
+with no agent container at all.
+
 ### Submit Service
 
 NYU CTF and AutoPenBench use an in-container Unix-socket submit service instead
 of one check container per trial.
 
+The lifecycle is owned by `cage/target/services/submit/service.py` (paths from
+`SUBMIT_SERVER_PATH` / `SUBMIT_CLIENT_PATH` / `SUBMIT_SOCKET_PATH`):
+
 ```text
-orchestrator
-  -> copies submit_server.py to /opt/cage-submit/submit_server.py
-  -> copies submit_client.py to /usr/local/bin/submit
+cage/target/services/submit/service.py
+  -> copies server.py to /opt/cage-submit/submit_server.py
+  -> copies client.py to /usr/local/bin/submit
   -> runs submit_server.py as root via docker exec -i
   -> sends only answer hash + metadata over stdin
   -> leaves stdin open until trial cleanup
@@ -434,36 +476,36 @@ Two reactive signals exist:
 | Signal | Source artifact | Success action |
 | --- | --- | --- |
 | `submit` result | `live_checks.jsonl` with `correct: true` | Write `runtime/live_success.json` with `source: submit` |
-| Agent touches `:9091` | new tool call in `proxy/proxy.jsonl` | Immediately call `benchmark._tool_check_done(container, sample)` once, then write success if that response is accepted |
+| Agent hits a live-check trigger | new tool call in `proxy/proxy.jsonl` | Immediately call `self.benchmark.scorer().gather(GatherRuntime(sample=…, container=…))` once, then write success if that evidence is accepted |
 
-The `:9091` detection scans only newly emitted tool-call command fields from the
-assistant response. It does not scan the full prompt/history, because CVEBench
-prompts mention `target:9091` on every request. If a `:9091` command is detected,
-the monitor logs the orchestrator-side check to:
-
-```text
-trials/{trial_id}/runtime/check_done_reactive.jsonl
-```
-
-The agent's original command is not stored there by default; the artifact stores
-the trigger class and `_tool_check_done` output to avoid leaking proof payloads.
+The trigger commands are **not** hardcoded to `:9091`: the monitor asks the
+benchmark via `Benchmark.live_check_triggers(sample)` (default `[":9091",
+"target:9091"]`). Detection scans only newly emitted tool-call command fields
+from the assistant response — never the full prompt/history, because CVEBench-
+style prompts mention `target:9091` on every request. When a trigger fires, the
+monitor runs the scorer's live half (`Scorer.gather`) and logs the check to the
+shared check-done timeline (`check_done_polls.jsonl`, see Polling Mode) rather
+than a separate reactive file. The agent's original command is not stored; only
+the trigger class and the gathered evidence are recorded, to avoid leaking proof
+payloads.
 
 ### Polling Mode
 
 Polling is separate from reactive mode. When enabled, `CheckDonePoller` calls:
 
 ```python
-benchmark._tool_check_done(container, sample)
+benchmark.scorer().gather(GatherRuntime(sample=sample, container=container))
 ```
 
 at `runtime.live_check.polling.interval_seconds`, regardless of whether the
-agent touched `:9091`. Each poll is written to:
+agent hit a live-check trigger. Both signals share **one** timeline —
+`CHECK_DONE_LOG_NAME = "check_done_polls.jsonl"`, so each poll is written to:
 
 ```text
 trials/{trial_id}/runtime/check_done_polls.jsonl
 ```
 
-If a poll response parses as success, CAGE writes `runtime/live_success.json`
+If a gathered response parses as success, CAGE writes `runtime/live_success.json`
 with `mode: polling` and `source: check_done`.
 
 ### Config
@@ -491,10 +533,9 @@ runtime:
 `meta.json` is marked as completed with `termination_reason: live_success`.
 
 `examples/nyuctfbench/default_nyu_ctf.yml` currently enables both reactive and polling, but NYU
-only has submit-based live success unless the benchmark implements
-`_tool_check_done()`. CVEBench implements `_tool_check_done()` and
-`_parse_live_success_output()`, so both `:9091` reactive confirmation and
-polling can work there.
+only has submit-based live success unless its scorer overrides `gather()`.
+CVEBench's scorer implements `gather()` (and parses its output into a verdict),
+so both trigger-driven reactive confirmation and polling can work there.
 
 ## Benchmark Boundaries
 
@@ -505,7 +546,7 @@ Benchmarks implement:
 | `iter_samples()` | Discover and normalize sample metadata |
 | `prepare_trial(container, sample, workspace)` | Copy files/env into the agent workspace |
 | `build_prompt(sample)` | Render benchmark-specific prompt text |
-| `score(output, sample, context)` | Convert agent output and artifacts into `Score` objects |
+| `scorer()` | Return the `Scorer` applied to every trial. The benchmark has **no** `score()` of its own — scoring lives on the scorer: `Scorer.score(ctx) -> dict[str, Score]` (offline verdict) and `Scorer.gather(runtime) -> str` (live evidence). |
 
 Current examples:
 
@@ -515,6 +556,9 @@ Current examples:
 | NYU CTF | `examples/nyuctfbench/benchmark.py` | `runtime/live_success.json` first, then flag extraction |
 | AutoPenBench | `examples/autopenbench/benchmark.py` | `runtime/live_success.json` first, then token extraction |
 | CVEBench | `examples/cvebench/benchmark.py` | `runtime/live_success.json`, then saved `check_done_output.txt`, then legacy `score_snapshot.json` |
+| CyberGym | `examples/cybergym/benchmark.py` | In-container `submit` PoC oracle; sanitizer-crash verifier over the staged binary |
+| HackWorld | `examples/hackworld/benchmark.py` | `Scorer.gather` marker/endpoint evidence read back via `ctx.live_payload` |
+| AgentPentestBench | `examples/agent_pentest_bench/benchmark.py` | Composite scorer: marker verifiers + LLM_judge over agent findings (web / post-exploit ranges) |
 
 ## Artifact Layout
 
@@ -538,8 +582,8 @@ Run artifacts live under `.cage_runs`.
             state_post/
             runtime/
               live_success.json
-              check_done_reactive.jsonl
               check_done_polls.jsonl
+              check_done_output.txt
 ```
 
 `proxy.jsonl` is the source of truth for LLM request/response traces. `.traj`
@@ -559,8 +603,8 @@ Live-check artifacts are intentionally split:
 | Artifact | Writer | Meaning |
 | --- | --- | --- |
 | `live_checks.jsonl` | submit server | Every agent `submit` attempt, hashed answer only |
-| `runtime/check_done_reactive.jsonl` | reactive monitor | Each orchestrator-side `_tool_check_done` triggered by an agent `:9091` command |
-| `runtime/check_done_polls.jsonl` | polling monitor | Each periodic orchestrator-side `_tool_check_done` call |
+| `runtime/check_done_polls.jsonl` | live monitor | One shared timeline (`CHECK_DONE_LOG_NAME`) for **both** signals — each `Scorer.gather` call, whether trigger-driven (reactive) or periodic (polling) |
+| `runtime/check_done_output.txt` | live monitor | The final gathered evidence string that offline `score(ctx)` reads back |
 | `runtime/live_success.json` | live-success recorder | The first accepted success verdict used by scoring |
 
 ## Synchronization Checklist
@@ -591,8 +635,9 @@ For CVEBench specifically, verify:
 - challenge metadata is available in `TargetConfig.challenges`
 - `challenge_id` and trial `id` semantics remain distinct when variants exist
 - target runtime network is connected before the agent starts
-- `target:9091` or `check:9091` tool-call detection does not scan prompt
-  history and only reacts to newly emitted tool-call commands
-- `_tool_check_done()` can be called from inside the agent container
+- `target:9091` or `check:9091` tool-call detection (via
+  `Benchmark.live_check_triggers`) does not scan prompt history and only reacts
+  to newly emitted tool-call commands
+- the scorer's `gather()` can reach the target from the live monitor
 - `runtime/live_success.json` takes precedence over post-trial
   `runtime/check_done_output.txt`

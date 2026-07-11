@@ -295,7 +295,7 @@ class HermesAgent(AgentType):
         """Start ``openviking-server`` (shared lifecycle in base.openviking)."""
         return openviking.start_server(
             container, home_dir=home_dir,
-            image_hint="pursu1ng/cage-images:hermes-openviking",
+            image_hint="cage/hermes:openviking",
         )
 
     @property

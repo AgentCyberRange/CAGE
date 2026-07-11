@@ -15,12 +15,18 @@
 # THIS container, no nested docker). `cybergym_agent` must import as a TOP-LEVEL
 # package (run_local uses absolute `from cybergym_agent...` imports), and `qitos`
 # (the framework it builds on) must be installed.
-FROM pursu1ng/ctfenv:latest
+FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
-# qitos needs Python >=3.10; ctfenv's default `python3` is miniconda 3.9, so use
-# the system /usr/bin/python3 (3.10) for the harness AND the cage proxy deps.
+# ubuntu:22.04 ships Python 3.10 as /usr/bin/python3; install pip plus the build
+# deps the harness (tree_sitter native, the qitos source build) and the cage
+# proxy need, and pin everything to the one system interpreter.
 ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev build-essential git ca-certificates; \
+    rm -rf /var/lib/apt/lists/*
 
 # qitos framework (from the pinned submodule third_party/qitos) + its model extra
 # (openai) and the cage proxy / agent runtime deps. tree_sitter backs the agent's
@@ -40,7 +46,7 @@ RUN /usr/bin/python3 -c "import qitos, cybergym_agent; from cybergym_agent impor
 # host side copies the sidecar to at trial start (baked for parity/offline).
 COPY cage/proxy/sidecar.py /opt/cage-proxy/container_proxy.py
 
-# Agent user (ctfenv base runs as root by default; Cage launches as --user agent).
+# Agent user (the base runs as root by default; Cage launches as --user agent).
 # Pre-create /opt/cage-agent so the custom-agent setup_container (docker cp the
 # entrypoint + chown, as the image's default user) works.
 ARG AGENT_SUDO_PASSWORD=cage

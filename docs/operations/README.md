@@ -124,6 +124,25 @@ trials/<trial_id>/proxy/stderr.log
 trials/<trial_id>/scores/
 ```
 
+## Scoring / Re-scoring
+
+Score (or re-score) a completed run without re-running the agent:
+
+```bash
+cage score <benchmark|project.yml|run-dir> \
+  [--run-id <run_id>] \
+  [--scorer path/to/scorer.py] \
+  [--max-concurrent N]
+```
+
+- `--run-id` restricts a benchmark/`project.yml` target to one run dir.
+- `--scorer` (repeatable) loads an alternate `Scorer` subclass.
+- `--max-concurrent N` scores up to N trials at once. The slow part of scoring is
+  the scorer itself — an `LLM_judge` signal makes one model call per trial — so N
+  fans those judges out over a thread pool. Only `scorer.score()` runs in
+  parallel; every artifact/manifest write stays serialized, so the output is
+  byte-identical to serial scoring. Unset ⇒ serial (`N=1`).
+
 ## Resume Policy
 
 Always preview:
@@ -158,6 +177,28 @@ resume:
     - target_unavailable
     - model_bad_gateway
 ```
+
+### Batched / gated resume
+
+`cage run --max-trial-num N` caps a run to the first N trials of the plan; pair
+it with `--resume` to work a large campaign in batches (each resume picks up the
+next slice of the plan).
+
+When the model endpoint is a self-hosted server that may still be booting, gate
+the (re)start on its readiness:
+
+```bash
+cage run web_exploit_bench \
+  --run-id <run_id> \
+  --resume \
+  --wait-for-model \
+  --wait-timeout 0 \
+  --wait-interval 30
+```
+
+`--wait-for-model` polls the run's `vllm` / `sglang` endpoints until they answer
+(SaaS providers are assumed always up), `--wait-timeout` bounds the wait
+(`0` = wait indefinitely), and `--wait-interval` sets the poll period in seconds.
 
 ## Cleanup
 
@@ -237,7 +278,7 @@ keys, prompts, target secrets, or private datasets to an untrusted network.
 
 | Incident | Action |
 |---|---|
-| Model endpoint outage | Stop or let current calls timeout, then resume with same run id |
+| Model endpoint outage | Stop or let current calls timeout, then resume with same run id (add `--wait-for-model` for a self-hosted endpoint that may still be booting) |
 | Docker daemon overloaded | Lower `runtime.max_trials_global`, cleanup orphan resources, resume |
 | Target setup storm | Set `runtime.max_target_setups: 1` |
 | Disk filling | Archive old `.cage_runs`, clean Docker resources, prune unused images deliberately |

@@ -142,6 +142,19 @@ cage benchmark build post_exploit_bench --sample pb-postexp-range-4
 > that case, rerun cage benchmark build with **--sample <sample-id>** to **rebuild the failed sample only**.
 
 ### 5. Run Evaluations
+
+`web_exploit_bench` scores some vulnerabilities with an LLM judge. Register its
+default judge `deepseek-v4-pro` the same way as the models above:
+
+```bash
+export DEEPSEEK_API_KEY=...
+cage model set deepseek-v4-pro \
+  --provider anthropic \
+  --model deepseek-v4-pro \
+  --endpoint https://api.deepseek.com/anthropic \
+  --api-key '${DEEPSEEK_API_KEY}'
+```
+
 Default full runs use the benchmark config as-is:
 ```bash
 cage run web_exploit_bench --agent codex --model gpt-5.5
@@ -181,7 +194,7 @@ post-exploitation tasks, hints may reveal topology or services:
 * `l1`: partial hints
 * `l2`: stronger hints
 
-### 6. Inspect and Resume runs:
+### 6. Inspect, resume, and re-score runs
 By default, cage run starts the browser inspector automatically. After the run completes, inspect the results in the browser.
 
 <img src="./docs/assets/inspector.png" width="600">
@@ -190,6 +203,18 @@ To continue a named run, pass the same --run-id with --resume:
 ```
 cage run web_exploit_bench --run-id web-smoke-001 --resume
 ```
+
+To **re-score** a finished run without re-running the agent, use `cage score`.
+It reuses the evidence already saved from the run, and scores trials in parallel
+when you pass `--max-concurrent`:
+
+```bash
+cage score web_exploit_bench --run-id web-smoke-001 --max-concurrent 8
+```
+
+By default it re-judges with the benchmark's judge model (`deepseek-v4-pro`). To
+judge with a different model, set `eval.benchmark.judge` to any model registered
+in `config/models.yml`.
 
 ## How a run works
 

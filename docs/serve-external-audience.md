@@ -100,6 +100,15 @@ curl -H "Authorization: Bearer <token>" -X POST \
 `python -m cage.target.serve` (which takes `--benchmark-root <dir>` /
 `--host` / `--port` / `--external-token` directly).
 
+Other `cage benchmark serve` flags:
+
+- `--namespace <name>` (default `default`) — the docker resource namespace this
+  server's targets run under; give co-running servers distinct namespaces so
+  their containers/networks stay isolated.
+- `--adapter path/to/module.py:ClassName` — load an extra benchmark adapter
+  (repeatable).
+- `--open` — open the read-only console in a browser after startup.
+
 ---
 
 ## Python client (SDK)

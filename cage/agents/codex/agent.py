@@ -19,8 +19,8 @@ from cage.sandbox.exec import ExecResult
 class CodexAgent(AgentType):
     name = "codex"
     state_paths = [".codex"]
-    default_image = "pursu1ng/cage-images:codex-latest"
-    dockerfile = "docker/codex/Dockerfile"
+    default_image = "cage/codex:pentestenv"
+    dockerfile = "docker/codex/pentestenv.Dockerfile"
 
     def install_command(self, version: str = "latest") -> str:
         return f"npm install -g @openai/codex@{version}"

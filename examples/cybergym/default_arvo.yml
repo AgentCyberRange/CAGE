@@ -95,7 +95,7 @@ agents:
         extra_env:
           CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
           DISABLE_INTERLEAVED_THINKING: "1"
-    image: pursu1ng/cage-images:claude-code-latest
+    image: cage/claude-code:pentestenv
     home: /home/agent/workspace
     # submit.sh blocks on synchronous host-side grading (~150s). Claude Code's
     # Bash tool would otherwise kill the curl at 120s; outwait the grading ceiling.

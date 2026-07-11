@@ -5,7 +5,8 @@ resolution, sample reconstruction, and score serialization — plus an
 end-to-end ``score_submission`` against a stub benchmark whose scorer records
 what it received. No docker, no network: the stub scorer's ``gather``/``score``
 are deterministic, so this exercises the closure's wiring (sample shape,
-GatherRuntime, persistence, ScoringContext) without a live target.
+GatherRuntime, persistence, ScoringContext, the serve-native record) without a
+live target.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from cage.contracts import RUNTIME_STATE_KEY
+from cage.target.server import serve_log
 from cage.target.server import submit as submit_mod
 from cage.target.server.submit import (
     SubmissionError,
@@ -189,7 +191,11 @@ class _StubScorer(Scorer):
             "container_is_none": runtime.container is None,
         })
     def score(self, ctx):
-        return {"stub": Score(value=1.0, answer="ok", explanation=ctx.check_done_output)}
+        # the judge input the offline re-judge needs: findings copied to the
+        # submission dir. Echo whether they are readable from ctx.trial_dir.
+        fa = ctx.trial_dir / "workspace" / "final_answer"
+        found = sorted(p.name for p in fa.glob("*.json")) if fa.is_dir() else []
+        return {"stub": Score(value=1.0, answer=",".join(found), explanation=ctx.check_done_output)}
 
 class StubBenchmark(Benchmark):
     def __init__(self, judge=None):
@@ -214,6 +220,8 @@ def _write_stub_benchmark(tmp_path) -> dict:
     chal_dir = bench_dir / "datasets" / "chalX"
     chal_dir.mkdir(parents=True)
     (bench_dir / "benchmark.py").write_text(_STUB_BENCHMARK, encoding="utf-8")
+    # a grader asset so the record's scoring_assets_digest is non-empty
+    (chal_dir / "metadata.json").write_text('{"id": "stub-chalX"}', encoding="utf-8")
     return {
         "id": "stub-chalX",
         "name": "chalX",
@@ -222,19 +230,26 @@ def _write_stub_benchmark(tmp_path) -> dict:
     }
 
 
-def test_score_submission_end_to_end_persists_inspectable_run(tmp_path):
+def _agent_out_with_findings(tmp_path, name="ao") -> Path:
+    agent_out = tmp_path / name
+    fa = agent_out / "final_answer"
+    fa.mkdir(parents=True)
+    (fa / "001.json").write_text('{"vuln_id": "v1"}', encoding="utf-8")
+    return agent_out
+
+
+def test_score_submission_writes_serve_native_record(tmp_path):
     challenge = _write_stub_benchmark(tmp_path)
     instance = {"chal_id": "stub-chalX", "project_name": "projX", "services": []}
-    agent_out = tmp_path / "agent_out"
-    (agent_out / "final_answer").mkdir(parents=True)
-    runs = tmp_path / "runs"
+    agent_out = _agent_out_with_findings(tmp_path)
+    serve = tmp_path / "serve"
 
     result = score_submission(
-        run_id="stub-chalX_r1",
+        run_id="inst-42",
         agent_output_dir=agent_out,
         instance=instance,
         challenge=challenge,
-        runs_root=runs,
+        serve_root=serve,
         uuid_hex="abcd1234",
         now=0.0,
     )
@@ -242,122 +257,137 @@ def test_score_submission_end_to_end_persists_inspectable_run(tmp_path):
     # verdict surfaced
     assert result["scores"]["stub"]["value"] == 1.0
     assert result["chal_id"] == "stub-chalX"
+    assert result["submission_id"] == "stub-chalX__inst-42_abcd1234"
+
+    # serve-native layout: .cage_serve/<client>/<submission_id>/
+    sub_dir = Path(result["submission_dir"])
+    assert sub_dir == serve / "local" / "stub-chalX__inst-42_abcd1234"
+    assert (sub_dir / "record.json").is_file()
+    assert (sub_dir / "task_output.json").is_file()
+    assert (sub_dir / "runtime" / "check_done_output.txt").is_file()
+    assert (sub_dir / "scores" / "stub.json").is_file()
 
     # gather saw the reconstructed sample + serve-only handles (container=None)
     evidence = json.loads(result["evidence"])
     assert evidence["project_name"] == "projX"
-    assert evidence["agent_output_dir_set"] is True
     assert evidence["container_is_none"] is True
 
-    # inspectable .cage_runs layout: one experiment per agent (default "local"),
-    # this submission is a trial appended to it.
-    run_dir = Path(result["run_dir"])
-    assert run_dir.parent.name == "serve__local"
-    assert run_dir.name == "serve"
-    trial_dir = run_dir / "trials" / "stub-chalX__stub-chalX_r1_abcd1234"
-    assert (trial_dir / "task_output.json").is_file()
-    assert (trial_dir / "runtime" / "check_done_output.txt").is_file()
-    assert (trial_dir / "meta.json").is_file()
-    assert (trial_dir / "scores" / "stub.json").is_file()
+    # FINDINGS PERSISTED — the offline-rejudge precondition (and the bug fix):
+    # the agent's final_answer survives into the submission dir, and score()
+    # could read it (the stub echoes the filenames it saw).
+    assert (sub_dir / "workspace" / "final_answer" / "001.json").is_file()
+    assert result["scores"]["stub"]["answer"] == "001.json"
 
-    # score file nested under scorer name (inspector shape); score() received the
-    # gather evidence via ScoringContext.check_done_output
-    score_json = json.loads((trial_dir / "scores" / "stub.json").read_text())
-    assert set(score_json) == {"stub"}
-    assert json.loads(score_json["stub"]["explanation"])["project_name"] == "projX"
-
-
-def test_persisted_run_is_inspector_readable(tmp_path):
-    """The persisted trial renders through the real cage inspector loader."""
-    from cage.web.data import load_trial_score_details
-
-    challenge = _write_stub_benchmark(tmp_path)
-    instance = {"chal_id": "stub-chalX", "project_name": "projX", "services": []}
-    agent_out = tmp_path / "ao"; agent_out.mkdir()
-
-    result = score_submission(
-        run_id="stub-chalX_r3",
-        agent_output_dir=agent_out,
-        instance=instance,
-        challenge=challenge,
-        runs_root=tmp_path / "runs",
-        uuid_hex="cafef00d",
-        now=0.0,
-    )
-    trial_dir = Path(result["run_dir"]) / "trials" / "stub-chalX__stub-chalX_r3_cafef00d"
-
-    # the inspector's score loader reads value/answer/explanation from scores/*.json
-    details = load_trial_score_details(trial_dir)
-    assert "stub" in details
-    assert details["stub"]["value"] == 1.0
-    assert details["stub"]["answer"] == "ok"
+    # the record round-trips and is provenance-complete
+    rec = serve_log.load_record(sub_dir)
+    assert rec is not None
+    assert rec.submission_id == "stub-chalX__inst-42_abcd1234"
+    assert rec.client_id == "local"
+    assert rec.challenge_id == "stub-chalX"
+    assert rec.target_launch.launch_id == "inst-42"       # bound to the boot
+    assert rec.target_launch.project_name == "projX"
+    assert rec.submission.has_findings is True
+    assert rec.submission.findings_digest.startswith("sha256:")
+    assert rec.inputs_digest.startswith("sha256:")
+    assert rec.grader.verifier_kind == "vuln_scripts"
+    assert rec.grader.scoring_assets_digest.startswith("sha256:")
+    # exactly one canonical pass, verifier-only (no judge configured)
+    assert len(rec.passes) == 1
+    p = rec.passes[0]
+    assert p.pass_id == rec.canonical_pass_id
+    assert p.pass_id == "verifier-only@1970-01-01T00:00:00Z"
+    assert p.judge_models == ()
+    assert p.provenance.mode == "serve"
+    assert p.provenance.target_launch_id == "inst-42"
+    assert p.provenance.inputs_digest == rec.inputs_digest
 
 
-def test_two_submissions_append_to_one_agent_experiment(tmp_path):
-    """Two submissions from one agent land as two trials in ONE experiment run."""
-    from cage.artifacts.reader import ExperimentArtifactReader
-
-    challenge = _write_stub_benchmark(tmp_path)
-    instance = {"chal_id": "stub-chalX", "project_name": "projX", "services": []}
-    agent_out = tmp_path / "ao"; agent_out.mkdir()
-    runs = tmp_path / "runs"
-
-    r1 = score_submission(
-        run_id="inst1", agent_output_dir=agent_out, instance=instance,
-        challenge=challenge, agent_id="agent_abc", runs_root=runs,
-        uuid_hex="1111", now=0.0,
-    )
-    r2 = score_submission(
-        run_id="inst2", agent_output_dir=agent_out, instance=instance,
-        challenge=challenge, agent_id="agent_abc", runs_root=runs,
-        uuid_hex="2222", now=0.0,
-    )
-    # same experiment run dir for both
-    assert r1["run_dir"] == r2["run_dir"]
-    run_dir = Path(r1["run_dir"])
-    assert run_dir == runs / "serve__agent_abc" / "serve"
-
-    # the experiment record now lists BOTH trials, and both render
-    record = ExperimentArtifactReader(run_dir).load_record()
-    trial_ids = {ref.trial_id for ref in record.trials.records}
-    assert trial_ids == {
-        "stub-chalX__inst1_1111",
-        "stub-chalX__inst2_2222",
-    }
-    from cage.web.data import load_trial_score_details
-    for tid in trial_ids:
-        details = load_trial_score_details(run_dir / "trials" / tid)
-        assert details["stub"]["value"] == 1.0
-
-
-def test_distinct_agents_get_distinct_experiments(tmp_path):
+def test_label_prefixes_dir_and_is_recorded(tmp_path):
     challenge = _write_stub_benchmark(tmp_path)
     instance = {"chal_id": "stub-chalX", "project_name": "p", "services": []}
-    agent_out = tmp_path / "ao"; agent_out.mkdir()
-    runs = tmp_path / "runs"
+    agent_out = _agent_out_with_findings(tmp_path)
+    serve = tmp_path / "serve"
+
+    result = score_submission(
+        run_id="inst1", agent_output_dir=agent_out, instance=instance,
+        challenge=challenge, serve_root=serve, label="my exp/A!", uuid_hex="ff00",
+        now=0.0,
+    )
+    sub_dir = Path(result["submission_dir"])
+    # label sanitized and used as the leaf-dir prefix, submission_id embedded
+    assert sub_dir.name == "my_exp_A___stub-chalX__inst1_ff00"
+    assert result["label"] == "my_exp_A_"
+    assert serve_log.load_record(sub_dir).label == "my_exp_A_"
+    # submission_id stays pure (no label) for programmatic lookup
+    assert result["submission_id"] == "stub-chalX__inst1_ff00"
+
+
+def test_pass_id_keyed_on_judge_model_and_time(tmp_path):
+    challenge = _write_stub_benchmark(tmp_path)
+    instance = {"chal_id": "stub-chalX", "project_name": "p", "services": []}
+    agent_out = _agent_out_with_findings(tmp_path)
+
+    result = score_submission(
+        run_id="inst1", agent_output_dir=agent_out, instance=instance,
+        challenge=challenge, serve_root=tmp_path / "serve",
+        judge={"model_id": "some-model"}, uuid_hex="aa", now=0.0,
+    )
+    rec = serve_log.load_record(Path(result["submission_dir"]))
+    assert result["pass_id"] == "some-model@1970-01-01T00:00:00Z"
+    assert rec.passes[0].judge_models == ("some-model",)
+    assert rec.passes[0].provenance.judge_models == ("some-model",)
+
+
+def test_two_submissions_same_client_two_records(tmp_path):
+    challenge = _write_stub_benchmark(tmp_path)
+    instance = {"chal_id": "stub-chalX", "project_name": "projX", "services": []}
+    agent_out = _agent_out_with_findings(tmp_path)
+    serve = tmp_path / "serve"
+
+    r1 = score_submission(run_id="inst1", agent_output_dir=agent_out, instance=instance,
+                          challenge=challenge, agent_id="agent_abc", serve_root=serve,
+                          uuid_hex="1111", now=0.0)
+    r2 = score_submission(run_id="inst2", agent_output_dir=agent_out, instance=instance,
+                          challenge=challenge, agent_id="agent_abc", serve_root=serve,
+                          uuid_hex="2222", now=0.0)
+
+    # two distinct submission dirs under the ONE client, each self-describing
+    assert r1["submission_dir"] != r2["submission_dir"]
+    client_dir = serve / "agent_abc"
+    leaves = sorted(p.name for p in client_dir.iterdir())
+    assert leaves == ["stub-chalX__inst1_1111", "stub-chalX__inst2_2222"]
+    for r in (r1, r2):
+        rec = serve_log.load_record(Path(r["submission_dir"]))
+        assert rec is not None and rec.client_id == "agent_abc"
+
+
+def test_distinct_clients_get_distinct_dirs(tmp_path):
+    challenge = _write_stub_benchmark(tmp_path)
+    instance = {"chal_id": "stub-chalX", "project_name": "p", "services": []}
+    agent_out = _agent_out_with_findings(tmp_path)
+    serve = tmp_path / "serve"
     a = score_submission(run_id="i", agent_output_dir=agent_out, instance=instance,
-                         challenge=challenge, agent_id="agent_a", runs_root=runs,
+                         challenge=challenge, agent_id="agent_a", serve_root=serve,
                          uuid_hex="aa", now=0.0)
     b = score_submission(run_id="i", agent_output_dir=agent_out, instance=instance,
-                         challenge=challenge, agent_id="agent_b", runs_root=runs,
+                         challenge=challenge, agent_id="agent_b", serve_root=serve,
                          uuid_hex="bb", now=0.0)
-    assert Path(a["run_dir"]).parent.name == "serve__agent_a"
-    assert Path(b["run_dir"]).parent.name == "serve__agent_b"
-    assert a["run_dir"] != b["run_dir"]
+    assert Path(a["submission_dir"]).parent == serve / "agent_a"
+    assert Path(b["submission_dir"]).parent == serve / "agent_b"
 
 
 def test_score_submission_injects_judge_config(tmp_path):
     challenge = _write_stub_benchmark(tmp_path)
     instance = {"chal_id": "stub-chalX", "project_name": "p", "services": []}
-    agent_out = tmp_path / "ao"; agent_out.mkdir()
+    agent_out = _agent_out_with_findings(tmp_path)
 
     result = score_submission(
-        run_id="stub-chalX_r2",
+        run_id="inst-r2",
         agent_output_dir=agent_out,
         instance=instance,
         challenge=challenge,
         judge={"model_id": "some-model"},
-        runs_root=tmp_path / "runs",
+        serve_root=tmp_path / "serve",
         uuid_hex="deadbeef",
         now=0.0,
     )

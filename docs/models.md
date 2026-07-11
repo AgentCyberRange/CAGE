@@ -52,32 +52,41 @@ models:
     auth_source: ""
     input_cost_per_1m: 0.0
     output_cost_per_1m: 0.0
-    timeout: 3600
+    timeout: 360      # default; omit to accept it
     max_retries: 2
     extra_headers: {}
 ```
 
 | Field | Meaning |
 |---|---|
-| `provider` | `openai`, `vllm`, or `anthropic` — also selects the wire protocol |
+| `provider` | `openai`, `vllm`, or `sglang` (OpenAI protocol); `anthropic` (Anthropic protocol); `gemini` / `google` (Google Generative Language API, for the `gemini_cli` agent). Selects the wire protocol. |
 | `model` | model name sent upstream |
 | `agent_model_names` | optional per-agent CLI model names, keyed by agent kind |
 | `base_url` | API base URL |
 | `api_key` / `api_keys` | a single key, or a list CAGE pins per-trial round-robin |
 | `auth_source` | host credential directory for supported subscription auth |
 | `input_cost_per_1m` / `output_cost_per_1m` | prices used to estimate `max_cost` when the provider reports no cost |
-| `timeout` / `max_retries` | upstream request timeout and retry count |
+| `timeout` / `max_retries` | upstream request timeout (default `360`) and retry count |
 | `extra_headers` | headers attached to every upstream model request |
+| `max_context_size` (alias `context_window_size`) | the endpoint's real context window, in tokens — a model capability. Honoured by `kimi_code` / `qwen_code`; unset ⇒ the agent CLI keeps its own default. `claude_code` **cannot** honour it (the Claude Code CLI has no custom-window knob). |
+| `reserved_context_size` | output headroom (tokens) an agent keeps free below `max_context_size` before auto-compacting (`kimi_code`) |
+| `rl_reward_sink` | RL-mode switch: URL an external trainer's reward sink listens on. Set it and every LLM call carries an `X-Trial-Id` header and each trial's reward is POSTed here; unset ⇒ an ordinary model. Also settable via `cage model set --rl-reward-sink`. |
+
+> `cage model set --provider` only accepts `openai` / `anthropic` / `vllm`. To
+> register a `gemini` / `google` / `sglang` endpoint, hand-edit
+> `config/models.yml` (or copy an example entry) — the loader accepts them even
+> though the `set` CLI does not.
 
 The complete field table is in the
 [Experiment YAML Reference](/reference/project-yml).
 
 ## Things worth knowing
 
-**Protocol follows `provider`.** `openai` and `vllm` speak the OpenAI protocol;
-`anthropic` speaks the Anthropic protocol. The in-container proxy translates when
-an agent and its model disagree, so a Claude Code agent can drive an
-OpenAI-protocol endpoint and vice versa.
+**Protocol follows `provider`.** `openai`, `vllm`, and `sglang` speak the OpenAI
+protocol; `anthropic` speaks the Anthropic protocol; `gemini` / `google` speak
+the Google Generative Language API (`generateContent`, for the `gemini_cli`
+agent). The in-container proxy translates when an agent and its model disagree,
+so a Claude Code agent can drive an OpenAI-protocol endpoint and vice versa.
 
 **`${ENV_VAR}` is expanded at load time.** Keep secrets in the environment and
 reference them, rather than pasting keys into the file:

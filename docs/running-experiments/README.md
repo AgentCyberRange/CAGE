@@ -272,6 +272,17 @@ cage score .cage_runs/<agent_label>/<run_id> \
   --scorer path/to/scorer.py
 ```
 
+Score in parallel. `--max-concurrent N` mirrors `cage run` — it scores up to
+`N` trials at once, which matters when a scorer re-runs an `LLM_judge` signal
+(one model call per trial). Only the scorer call is parallelized; artifacts are
+still written serially, so results are identical to serial scoring:
+
+```bash
+cage score examples/agent_pentest_bench/default_web_exploit.yml \
+  --run-id web-smoke-001 \
+  --max-concurrent 8
+```
+
 ## Cleanup
 
 Dry-run Docker resource GC:

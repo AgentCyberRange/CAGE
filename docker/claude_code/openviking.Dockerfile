@@ -11,7 +11,7 @@
 #   cage debug --agent claude_code --model ... --plugin openviking-memory \
 #              --image cage/claude-code:openviking
 
-FROM pursu1ng/cage-images:claude-code-latest
+FROM cage/claude-code:pentestenv
 
 # Install OpenViking server (uses Tsinghua PyPI mirror)
 RUN pip3 install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple openviking

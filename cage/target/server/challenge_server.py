@@ -769,6 +769,7 @@ async def submit_challenge(
         File(description="tar.gz/zip of the agent output dir (its final_answer/ holds per-vuln reports). Omit for marker-only post-exploitation challenges."),
     ] = None,
     close: Annotated[bool, Query(description="Tear the instance down (DELETE) after scoring. Default: keep it up (e.g. for inspection). One submission per instance either way.")] = False,
+    label: Annotated[str, Query(description="Optional human-friendly name for this submission's record, for easy lookup (prefixes the .cage_serve dir). Not an identity — may be empty or repeat.")] = "",
     audience: str = Depends(resolve_audience),
 ):
     """Score one submission against a still-running serve-only instance.
@@ -777,10 +778,10 @@ async def submit_challenge(
     attacked it, and (for web) produced a ``final_answer/`` output — omit the
     upload entirely for marker-only post-exploitation ranges, which are scored
     from live target state. This gathers LIVE evidence against the still-up
-    target and scores it with the challenge's benchmark scorer, persisting an
-    inspectable run under ``.cage_runs``. Gather needs the target alive, so
-    scoring runs before any ``?close=true`` teardown. Audience-gated like
-    ``/launch``.
+    target and scores it with the challenge's benchmark scorer, writing a
+    serve-native submission record under ``.cage_serve``. Gather needs the
+    target alive, so scoring runs before any ``?close=true`` teardown.
+    Audience-gated like ``/launch``.
 
     **One submission per instance.** The verdict is locked in on the first call;
     a repeat for the same ``run_id`` returns it unchanged (``already_submitted``)
@@ -822,6 +823,7 @@ async def submit_challenge(
                 instance=instance,
                 challenge=challenge,
                 agent_id=_resolve_agent_id(request),
+                label=label,
                 judge=_resolve_submit_judge(),
             )
         except SubmissionError as exc:

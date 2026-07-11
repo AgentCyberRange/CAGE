@@ -29,7 +29,6 @@ from cage.target.server.network_admin import (
     capture_project_logs,
     resolve_service_inner_ips,
     self_heal_docker_network,
-    summarize_project_containers,
 )
 from cage.target.server.schemas import EntryUrl, LaunchResponse, ServiceInfo
 from cage.target.server.server_state import (

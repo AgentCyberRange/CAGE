@@ -139,7 +139,27 @@ def _score_output_path_for_context(ctx: Any, score_name: str) -> Path | None:
         "Without this flag, every matching run dir is rescored."
     ),
 )
-def score(target: str, scorer_paths: tuple[str, ...], run_id_filter: str) -> None:
+@click.option(
+    "--max-concurrent",
+    "max_concurrent",
+    type=int,
+    default=None,
+    help=(
+        "Score up to N trials AT ONCE (a concurrency cap, same flag as "
+        "`cage run`). The slow part of scoring is the scorer itself — an "
+        "LLM_judge signal makes one model call per trial — so N-way "
+        "concurrency reruns that many judges in parallel. Only the expensive "
+        "scorer.score() is parallelized; every artifact/manifest write stays "
+        "serialized, so output is identical to serial scoring. Unset means "
+        "serial (N=1)."
+    ),
+)
+def score(
+    target: str,
+    scorer_paths: tuple[str, ...],
+    run_id_filter: str,
+    max_concurrent: int | None,
+) -> None:
     """Score (or re-score) trial results from a completed run."""
 
     from cage.scoring import (
@@ -319,13 +339,45 @@ def score(target: str, scorer_paths: tuple[str, ...], run_id_filter: str) -> Non
 
     click.echo(f"Found {len(scoring_contexts)} trials")
 
-    results: dict[str, dict[str, dict[str, object]]] = {}
-    canonical_run_score_values: dict[Path, dict[str, list[float]]] = {}
-    for ctx in scoring_contexts:
-        trial_scores: dict[str, dict[str, object]] = {}
+    # Concurrency cap, mirroring `cage run --max-concurrent`: how many trials to
+    # score AT ONCE. Only the expensive scorer.score() (an LLM_judge signal is
+    # one model call per trial) is fanned out; every disk/manifest mutation is
+    # applied serially below, so N=1 and N>1 produce byte-identical artifacts.
+    workers = max(1, max_concurrent or 1)
+    if scoring_contexts:
+        workers = min(workers, len(scoring_contexts))
+    else:
+        workers = 1
+
+    def _compute_scores(
+        ctx: ScoringContext,
+    ) -> tuple[ScoringContext, list[tuple[Scorer, Any, Exception | None]]]:
+        """Run every scorer for one trial (no disk writes — thread-safe)."""
+        computed: list[tuple[Scorer, Any, Exception | None]] = []
         for scorer in scorers:
             try:
-                scores_map = scorer.score(ctx)
+                computed.append((scorer, scorer.score(ctx), None))
+            except Exception as exc:  # noqa: BLE001
+                computed.append((scorer, None, exc))
+        return ctx, computed
+
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        click.echo(f"Scoring with {workers} concurrent workers")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            computed_trials = list(executor.map(_compute_scores, scoring_contexts))
+    else:
+        computed_trials = [_compute_scores(ctx) for ctx in scoring_contexts]
+
+    results: dict[str, dict[str, dict[str, object]]] = {}
+    canonical_run_score_values: dict[Path, dict[str, list[float]]] = {}
+    for ctx, computed in computed_trials:
+        trial_scores: dict[str, dict[str, object]] = {}
+        for scorer, scores_map, compute_error in computed:
+            try:
+                if compute_error is not None:
+                    raise compute_error
                 for name, s in scores_map.items():
                     trial_scores[name] = {
                         "value": s.value,

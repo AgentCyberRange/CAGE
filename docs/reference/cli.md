@@ -22,12 +22,19 @@ uv run python -m cage.cli <command> --help
 | Command | Purpose |
 |---|---|
 | `cage run` | Run or resume a registered benchmark id or project YAML |
-| `cage benchmark` | List registered benchmarks, render prompt checks, run benchmark build hooks |
+| `cage benchmark` | List registered benchmarks, render prompt checks, run benchmark build hooks, serve targets as a range |
 | `cage model` | List, show, and edit `config/models.yml` |
 | `cage agent` | List, build, and debug agent runtimes |
 | `cage inspect` | Browse run artifacts in the web inspector |
 | `cage score` | Score or re-score completed runs |
 | `cage gc` | Reclaim Docker resources for dead/orphaned runs |
+
+Global options (before the subcommand):
+
+| Option | Meaning |
+|---|---|
+| `-v` / `--verbose` | Enable debug logging (equivalent to `--log-level DEBUG`) |
+| `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Console log level (default `INFO`) |
 
 Low-level legacy aliases are not part of the command tree. Use the public
 groups below; internal subprocess entrypoints live as Python modules rather
@@ -68,12 +75,16 @@ Common options:
 | `--max-concurrent N` | Override selected agent concurrency; with `--resume` and no `--agent`, cap all agents |
 | `--passk N` | Override `runtime.passk` |
 | `--timeout S` | Override `runtime.timeout` |
-| `--max-rounds N` | Override `runtime.max_rounds` |
+| `--max-rounds VALUE` | Override `runtime.max_rounds`. Takes a positive `N`, `unlimited` (no round cap — needs another stop condition), or `-1` (use the benchmark's built-in default) |
 | `--max-input-tokens N` | Override `runtime.max_input_tokens` |
 | `--max-output-tokens N` | Override `runtime.max_output_tokens` |
 | `--max-cost USD` | Override `runtime.max_cost` |
+| `--wait-for-model` | Before starting, poll every model endpoint (and each `--model-source`) until it answers — for remotely-launched vLLM servers with unknown boot time |
+| `--wait-timeout S` | Max seconds to wait with `--wait-for-model` (default `0.0` = wait indefinitely) |
+| `--wait-interval S` | Seconds between `--wait-for-model` polls (default `30.0`) |
 | `--upstream-proxy URL` | Override `proxy.upstream_http_proxy` |
 | `--set PATH=VALUE` | Override an arbitrary project YAML path |
+| `--param KEY=VALUE` | Set a custom-agent param (fills a manifest `{placeholder}`); repeatable; requires one `--agent` if ambiguous |
 | `--run-id ID` | Set the run id |
 | `--resume` | Resume an existing run id |
 | `--force` | Archive an existing run id and start fresh |
@@ -157,7 +168,9 @@ Useful `benchmark check` options:
 | `--upstream-proxy URL` | Override proxy egress |
 | `--set PATH=VALUE` | Override a project YAML path |
 | `--out DIR` | Write check artifacts to a custom directory |
+| `--preview-lines N` | Prompt preview lines to print for one-sample checks (default `12`) |
 | `--show-prompt` | Print full rendered prompts |
+| `--strict-exit` / `--no-strict-exit` | Exit non-zero if any prompt check fails (default `--strict-exit`) |
 
 Run a registered benchmark build hook without launching targets:
 
@@ -173,8 +186,38 @@ Build options:
 |---|---|
 | `--sample ID` / `--only ID` | Restrict sample ids |
 | `--limit N` | Build only first `N` samples |
-| `--max-concurrent N` | Build up to `N` benchmark targets concurrently |
+| `--max-concurrent N` | Build up to `N` benchmark targets concurrently (default `1`) |
 | `--dry-run` | Print build hooks and image tags without building |
+| `--rebuild` | Rebuild target images even if already built (default: skip images already built) |
+| `--set PATH=VALUE` | Override a project YAML path, e.g. `--set eval.benchmark.hint_levels=[0]` |
+
+## `cage benchmark serve`
+
+Stand a benchmark's targets up as a browsable range (serve / PULL mode) without
+running a full trial. An external agent then drives the targets itself over the
+serve HTTP contract (list → launch → prompt → submit → close).
+
+```bash
+cage benchmark serve web_exploit_bench
+cage benchmark serve web_exploit_bench --host 0.0.0.0 --port 8000 --open
+```
+
+| Option | Meaning |
+|---|---|
+| `--benchmark-root DIR` | Explicit directory of `challenge.json` targets (overrides the `BENCHMARK` argument); use for a dataset dir not laid out as `examples/<benchmark>/` |
+| `--host HOST` | Interface to bind (default `127.0.0.1`; use `0.0.0.0` to expose externally) |
+| `--port N` | Port to listen on (default `8000`) |
+| `--namespace NAME` | Docker resource namespace isolating this server's targets (default `default`) |
+| `--external-token TOKEN` | Enable external-audience mode (see below); empty means every caller is internal (legacy single-audience) |
+| `--judge-model MODEL_ID` | Override the judge model for the `LLM_judge` signal; defaults to the benchmark's own declared judge |
+| `--prompt-level [l0\|l1\|l2]` | Default hint tier for `GET /prompt` (default `l0`); the effective tier is bound per instance at launch (`GET /launch?prompt_level=`) |
+| `--adapter MODULE:CLASS` | Load an extra benchmark adapter; repeatable |
+| `--open` | Open the console in a browser after start |
+
+With `--external-token` set, the server runs in two-audience mode: loopback
+callers are treated as internal, while non-loopback callers must present
+`Authorization: Bearer <token>`. Without the flag every caller is internal
+(legacy single-audience behaviour).
 
 ## `cage model`
 
@@ -205,6 +248,7 @@ Useful `model set` options:
 | `--output-cost-per-1m N` | Output price per 1M tokens |
 | `--timeout S` | Model request timeout |
 | `--max-retries N` | Upstream retry count |
+| `--rl-reward-sink URL` | Enable RL mode: URL the trainer's reward sink listens on. LLM calls then carry an `X-Trial-Id` header and each trial's reward is POSTed here. Pass an empty string to disable |
 
 ## `cage agent`
 
@@ -236,10 +280,14 @@ cage agent debug --agent codex --model gpt-5.5
 cage inspect [PATH] [--host HOST] [--port PORT] [--no-open]
 ```
 
+`PATH` defaults to `examples/` (scan every project). `--host`, `--port`, and
+`--no-open` all default to `None`; unset, they fall back to the values in
+`config/cage.yml` (every inspector shares that single port).
+
 Examples:
 
 ```bash
-cage inspect .cage_runs --host 127.0.0.1 --port 8090
+cage inspect
 cage inspect examples/agent_pentest_bench --host 0.0.0.0 --port 8090 --no-open
 ```
 
@@ -266,6 +314,18 @@ Run-directory mode applies only explicitly supplied scorer files:
 ```bash
 cage score .cage_runs/<agent_label>/<run_id> \
   --scorer path/to/scorer.py
+```
+
+Scoring is serial by default. `--max-concurrent N` (the same flag as `cage
+run`) scores up to `N` trials at once — useful when a scorer re-runs an
+`LLM_judge` signal, i.e. one model call per trial. Only the scorer call is
+parallelized; every score artifact is still written serially, so the output is
+identical to serial scoring:
+
+```bash
+cage score examples/agent_pentest_bench/default_web_exploit.yml \
+  --run-id web-smoke-001 \
+  --max-concurrent 8
 ```
 
 ## `cage gc`

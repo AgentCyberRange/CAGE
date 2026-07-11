@@ -35,7 +35,7 @@ class TestContainer:
     def test_start_uses_configured_network_mode(self) -> None:
         container = Container(
             name="cage-test-network",
-            image="pursu1ng/cage-images:claude-code-latest",
+            image="cage/claude-code:pentestenv",
             network_mode="host",
         )
 
@@ -77,7 +77,7 @@ class TestContainer:
             "all_proxy=",
             "--add-host",
             "host.docker.internal:host-gateway",
-            "pursu1ng/cage-images:claude-code-latest",
+            "cage/claude-code:pentestenv",
             "sleep",
             "infinity",
         ]]
@@ -88,7 +88,7 @@ class TestContainer:
     def test_start_mounts_colon_host_paths_with_mount_flag(self) -> None:
         container = Container(
             name="cage-test-volume-colon",
-            image="pursu1ng/cage-images:claude-code-latest",
+            image="cage/claude-code:pentestenv",
             volumes={
                 "/var/cage_runs/agent:model:stateless/run-fixed/trials/trial-one/proxy": (
                     "/var/lib/cage/proxy"
@@ -127,7 +127,7 @@ class TestContainer:
     def test_start_preserves_readonly_volume_mode_with_mount_flag(self) -> None:
         container = Container(
             name="cage-test-volume-readonly",
-            image="pursu1ng/cage-images:claude-code-latest",
+            image="cage/claude-code:pentestenv",
             volumes={"/tmp/plugin-marketplace": "/opt/cage-plugins/plugin-marketplace:ro"},
         )
 
@@ -162,7 +162,7 @@ class TestContainer:
     def test_start_passes_supplemental_groups(self) -> None:
         container = Container(
             name="cage-test-group-add",
-            image="pursu1ng/cage-images:claude-code-latest",
+            image="cage/claude-code:pentestenv",
             group_add=["1002"],
         )
 
@@ -193,7 +193,7 @@ class TestContainer:
     def test_sync_runtime_network_connects_and_switches_networks(self) -> None:
         container = Container(
             name="cage-test-network-sync",
-            image="pursu1ng/cage-images:claude-code-latest",
+            image="cage/claude-code:pentestenv",
             network_mode=None,
         )
         container._started = True
@@ -226,7 +226,7 @@ class TestContainer:
     def test_copy_to_accepts_custom_timeout(self) -> None:
         container = Container(
             name="cage-test-copy-to",
-            image="pursu1ng/cage-images:claude-code-latest",
+            image="cage/claude-code:pentestenv",
         )
 
         recorded: list[tuple[list[str], float | None]] = []

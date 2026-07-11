@@ -11,8 +11,13 @@ can be evaluated on Cage's benchmarks.
 > state, and scores the result. LangGraph node structure shows up in the
 > trajectory viewer automatically.
 >
-> The fastest way to start is to copy [`references/agentic-poc/`](../references/agentic-poc)
+> The fastest way to start is to copy [`references/agentic-poc/`](https://github.com/AgentCyberRange/CAGE/tree/main/references/agentic-poc)
 > — a real LangGraph agent already wired this way — and edit it.
+>
+> `references/agentic-poc/` is a standalone reference; the **in-repo canonical
+> home** for a custom agent is `cage/agents/custom/<name>/` (an `agent.yml` with a
+> `source:` key), as used by the shipped `qitos` / `cairn` agents. Either layout
+> works — the manifest is the same.
 
 There are two ways to add an agent to Cage. This guide is the **custom-agent
 (manifest)** path, which is the right one for a LangGraph/LangChain agent you
@@ -364,15 +369,15 @@ already drives any manifest.
 
 ## Where to look
 
-- [`references/agentic-poc/`](../references/agentic-poc) — the real LangGraph
+- [`references/agentic-poc/`](https://github.com/AgentCyberRange/CAGE/tree/main/references/agentic-poc) — the real LangGraph
   example this guide is built on.
-- [`cage/agents/custom/manifest.py`](../cage/agents/custom/manifest.py) — the
+- [`cage/agents/custom/manifest.py`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/manifest.py) — the
   authoritative `agent.yml` schema.
-- [`cage/agents/custom/agent.py`](../cage/agents/custom/agent.py) — the generic
+- [`cage/agents/custom/agent.py`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/agent.py) — the generic
   interpreter (token filling, `docker cp`, output parsing).
-- [`cage/agents/custom/trace_runtime/`](../cage/agents/custom/trace_runtime) —
+- [`cage/agents/custom/trace_runtime/`](https://github.com/AgentCyberRange/CAGE/tree/main/cage/agents/custom/trace_runtime) —
   the zero-code LangGraph trace hook.
-- [`docker/custom_langgraph/Dockerfile`](../docker/custom_langgraph/Dockerfile)
+- [`docker/custom_langgraph/Dockerfile`](https://github.com/AgentCyberRange/CAGE/blob/main/docker/custom_langgraph/Dockerfile)
   — the runtime base recipe.
 - [`docs/agent-cage-managed.md`](agent-cage-managed.md) — the heavier path for
   wrapping a third-party agent *CLI* as a registered `AgentType`.

@@ -145,6 +145,15 @@ This discovers and serves all of the benchmark's challenge indices
 Override the judge with `--judge-model <id>` (§2); expose it to other machines
 with `--host 0.0.0.0 --external-token "$(openssl rand -hex 16)"`.
 
+Other flags:
+
+- `--namespace <name>` (default `default`) — the docker resource namespace this
+  server's targets live under. Give each of two co-running servers a distinct
+  namespace so their containers/networks stay isolated.
+- `--adapter path/to/module.py:ClassName` — load an extra benchmark adapter
+  (repeatable) beyond those discovered under the benchmark.
+- `--open` — open the read-only console in a browser after startup.
+
 ## 4. The evaluation loop (Python SDK)
 
 Rather than hand-rolling HTTP and multipart requests, use the bundled
@@ -311,8 +320,9 @@ exposes ports on the host.
 ## 6. Results persistence and audit
 
 Each submission is persisted as one trial under
-`.cage_runs/serve__<client_id>/serve/` — the **same `.cage_runs` tree the
-inspector reads** — so `cage inspect` lists it alongside `cage run` results.
+`.cage_runs/serve__agent_<client_id>/serve/` (the server prefixes the client id
+with `agent_`) — the **same `.cage_runs` tree the inspector reads** — so
+`cage inspect` lists it alongside `cage run` results.
 Semantically, one served benchmark corresponds to "one experiment per external
 agent" (each distinct `client_id` has its own scored run), and each submission
 appends a trial.

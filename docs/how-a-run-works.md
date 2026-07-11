@@ -50,17 +50,20 @@ cage run project.yml
          6. inject target info into the sample
          7. start the submit service            (when the benchmark uses flags)
        EXECUTE
-         8. start the in-container LLM proxy
-         9. build_prompt()              L2     render the agent-facing prompt
+         8. build_prompt()              L2     render the agent-facing prompt
+         9. start the in-container LLM proxy
         10. start live-success monitors
         11. run the agent CLI                   the agent works the task
         12. stop the proxy, collect its logs
        SCORE
-        13. snapshot post-state
-        14. collect runtime artifacts
-        15. score()                    L2     prefer the live verdict, else parse output
+        13. on_agent_finish()          L2     materialize agent output to the host
+        14. Scorer.gather()            L2     gather live evidence from the target
+        15. on_trial_complete()        L2     target post-mortem (agent stopped)
+        16. collect runtime artifacts + write the .traj
+        17. snapshot post-state
+        18. Scorer.score()             L2     verdict: live evidence, else parse output
        CLEANUP
-        16. tear down submit service, target network, target stack
+        19. tear down submit service, target network, target stack
 ```
 
 The four phases map onto the four things a fair evaluation needs: a **clean,
@@ -105,10 +108,11 @@ endpoint at it. Every model call the agent makes is therefore observed:
 
 ```text
 cage/proxy/host.py
-  → writes proxy config JSON into the container
-  → copies cage/proxy/sidecar.py to /opt/cage-proxy/
+  → writes proxy config JSON to /run/cage-proxy/config.json in the container
+  → copies cage/proxy/sidecar.py to /opt/cage-proxy/container_proxy.py
   → starts it, health-checks /healthz
-  → collects /tmp/cage_proxy_logs/proxy.jsonl
+  → the sidecar logs into /var/lib/cage/proxy inside the container;
+    the host collects that into trials/<trial>/proxy/proxy.jsonl
 ```
 
 The sidecar translates Anthropic-style calls to the upstream protocol when the
@@ -149,8 +153,9 @@ bridges, multi-network ranges) see
 
 ### State snapshots
 
-Steps 3 and 13 snapshot the agent's state directories before and after the
-trial. For a **stateful** agent (`shared_paths` non-empty) this captures
+Steps 3 and 17 snapshot the agent's state directories before and after the
+trial. The post-state snapshot runs *after* `Scorer.gather` — evidence is
+collected off the live target first, then the state is frozen. For a **stateful** agent (`shared_paths` non-empty) this captures
 persistence across trials; for a **stateless** agent it captures the per-trial
 delta. Stateful-vs-stateless is a property of the *agent config*, not the
 benchmark.
@@ -165,10 +170,21 @@ dir.
 
 ### Scoring runtime
 
-The benchmark's `score()` runs at step 15, but the **same** scorer with the
-**same** `ScoringContext` also runs in two other places: as a mid-trial live
-monitor, and offline via `cage score`. One scorer, three call sites. If a scorer
-works inline but not offline, the scorer is the bug, not the call site.
+The benchmark supplies a `Scorer` via `scorer()`; its `Scorer.score(ctx)` runs
+at step 18. The **same** scorer with the **same** `ScoringContext` also runs in
+two other places: as a mid-trial live monitor, and offline via `cage score`. One
+scorer, three call sites. If a scorer works inline but not offline, the scorer is
+the bug, not the call site.
+
+The live half of scoring is `Scorer.gather(runtime: GatherRuntime)` (step 14).
+`GatherRuntime` decouples evidence collection
+from "the agent container": it reaches the target through the sample and reads
+the agent's output from a host directory (`agent_output_dir`) or, in `cage run`
+before the workspace is copied out, the live container. That decoupling is what
+lets scoring run with **no agent container at all** — see serve/PULL mode below.
+
+A scorer emits one or more of two signals: a **verifier** (deterministic
+target-side or output check) and an **LLM_judge** (a model grades the evidence).
 
 Scoring prefers a **live-success verdict** (written while the agent was still
 running) over post-hoc text extraction:
@@ -182,6 +198,15 @@ CVE check endpoint touched) writes this verdict; scoring trusts it first. See
 [Architecture › Live Check](/repo-architecture#live-check-and-success-verdicts).
 
 **Artifact:** `trials/<trial>/scores/<benchmark>.json`.
+
+::: info `cage run` is not the only run style
+`cage benchmark serve` exposes the same benchmark's targets over HTTP so an
+**external** agent drives them itself (list → launch → prompt → submit → close).
+There is no CAGE-managed agent container, so scoring runs off the submitted
+output via `Scorer.gather`'s `agent_output_dir` instead of a live container —
+the same scorer, a different driver. See
+[Serve Mode](/agent-serve-mode).
+:::
 
 ### Termination and resume
 
@@ -229,7 +254,8 @@ meaning reaches the inspector only through `Benchmark.build_dashboard()`.
           state_pre/  state_post/
           runtime/
             live_success.json                  first accepted success verdict
-            check_done_*.jsonl
+            check_done_output.txt              final gathered live evidence (Scorer.gather)
+            check_done_polls.jsonl             live-monitor poll log
 ```
 
 `dashboard.json` is the one-file projection that powers the inspector overview

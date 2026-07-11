@@ -13,22 +13,23 @@ then, without ever naming a benchmark:
      web) — so this must run BEFORE the instance is closed,
   5. ``scorer.score()`` — scores offline (verifier signals always; the optional
      ``LLM_judge`` signal only when a judge model is injected),
-  6. persists an inspectable run under ``.cage_runs/`` so the existing cage
-     inspector renders the verdict. The serve console (launch/submit) and the
-     inspector (verdict) are the two halves of the same benchmark surface,
-     rooted at the same ``.cage_runs`` tree.
+  6. writes a **serve-native submission record** under ``.cage_serve/`` (see
+     :mod:`cage.target.server.serve_log`) — a target-centric log carrying the
+     trial's information minus the agent half, with the agent findings persisted
+     so an offline re-judge has its inputs.
 
-Layer-1 clean: the benchmark is *discovered* by its configured source path and
-loaded via :func:`cage.benchmarks.loader.load_benchmark_from_module` — the
-framework never names a benchmark. The server hosts targets and orchestrates a
-benchmark-supplied scorer; it does not know what any benchmark is.
+Serve mode has no Cage-launched agent, so it does NOT reuse the agent-centric
+``cage run`` experiment record; it has its own log. Layer-1 clean: the benchmark
+is *discovered* by its configured source path and loaded via
+:func:`cage.benchmarks.loader.load_benchmark_from_module` — the framework never
+names a benchmark. The server hosts targets and orchestrates a benchmark-supplied
+scorer; it does not know what any benchmark is.
 """
 from __future__ import annotations
 
 import dataclasses
 import json
 import logging
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -38,6 +39,7 @@ from cage.benchmarks.loader import load_benchmark_from_module
 from cage.contracts import RUNTIME_STATE_KEY
 from cage.scoring import ScoringContext
 from cage.scoring.scorer import GatherRuntime
+from cage.target.server import serve_log
 
 logger = logging.getLogger(__name__)
 
@@ -266,172 +268,35 @@ def _score_to_dict(score: Any) -> dict[str, Any]:
     }
 
 
-def _persist_run(
-    runs_root: Path,
-    subject: str,
-    run_id: str,
-    trial_id: str,
-    *,
-    sample: dict[str, Any],
-    output: str,
-    evidence: str,
-) -> tuple[Path, Path]:
-    """Write the ``.cage_runs`` trial layout the scorer + inspector read.
+_JUDGE_MODEL_KEYS = ("model_id", "id", "model")
 
-    Returns ``(run_dir, trial_dir)``. The layout is the same
-    ``.cage_runs/<subject>/<run_id>/trials/<trial_id>/`` shape a cage-run trial
-    uses, so the cage inspector's legacy discovery lists it and opens the trial
-    (the console launches, the inspector shows the verdict — one ``.cage_runs``
-    tree). Writes ``task_output.json`` (output + sample),
-    ``runtime/check_done_output.txt`` (the gathered evidence, read by
-    :pyattr:`ScoringContext.check_done_output`), and ``meta.json`` (trial status
-    the inspector's trial page reads). The scores file is written by the caller
-    after scoring.
+
+def _judge_model_ids(judge: dict[str, Any] | None) -> tuple[str, ...]:
+    """Extract the judge model id(s) from a judge config for the pass signature.
+
+    Accepts the legacy single ``model_id``/``id``/``model`` form OR a ``models:``
+    list of strings/dicts (an ensemble). Returns ``()`` when no judge is
+    configured — the pass is then a verifier-only pass.
     """
-    run_dir = runs_root / subject / run_id
-    trial_dir = run_dir / "trials" / trial_id
-    (trial_dir / "runtime").mkdir(parents=True, exist_ok=True)
-    (trial_dir / "task_output.json").write_text(
-        json.dumps({"output": output, "sample": sample}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    (trial_dir / "runtime" / "check_done_output.txt").write_text(
-        evidence or "", encoding="utf-8"
-    )
-    (trial_dir / "meta.json").write_text(
-        json.dumps({"trial_id": trial_id, "status": "completed"}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return run_dir, trial_dir
-
-
-_EXPERIMENT_LOCKS: dict[str, threading.Lock] = {}
-_EXPERIMENT_LOCKS_GUARD = threading.Lock()
-
-
-def _experiment_lock(run_dir: Path) -> threading.Lock:
-    """A process-local lock per experiment run dir (serializes concurrent appends)."""
-    key = str(run_dir)
-    with _EXPERIMENT_LOCKS_GUARD:
-        lock = _EXPERIMENT_LOCKS.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _EXPERIMENT_LOCKS[key] = lock
-    return lock
-
-
-def _append_trial_to_experiment(
-    run_dir: Path,
-    trial_dir: Path,
-    *,
-    experiment_run_id: str,
-    trial_id: str,
-    chal_id: str,
-    agent_id: str,
-    benchmark: str,
-    scores_out: dict[str, Any],
-    created_at_iso: str,
-) -> None:
-    """Append this scored submission as one trial to the agent's experiment.
-
-    A serve-only session is ONE experiment per external agent (``subject`` =
-    ``serve__<agent_id>``, one run): every ``POST /submit`` adds a trial. The
-    inspector's detail view resolves scores only through the canonical
-    ``experiment_record`` + ``artifact_index`` + ``TrialRecord`` (never an
-    unindexed ``scores/*.json`` path), so this maintains that canonical set,
-    MERGING the new trial into the existing plan / record / index rather than
-    overwriting — the run accumulates the agent's challenges over time, agent
-    runtime and trajectory externalized (those panels stay empty). Serialized by
-    a per-run lock; best-effort (the caller ignores failures so a records hiccup
-    never sinks a real verdict).
-    """
-    import cage.experiment.model as M
-    from cage.artifacts.reader import ExperimentArtifactReader
-
-    trial_rel = trial_dir.relative_to(run_dir).as_posix()  # trials/<trial_id>
-    new_artifacts = tuple(
-        M.ArtifactRef(
-            artifact_id=f"trial.{trial_id}.score.{name.replace('/', '_')}",
-            path=f"{trial_rel}/scores/{name.replace('/', '_')}.json",
-            kind="trial_score",
-        )
-        for name in scores_out
-    )
-    primary_score_ref = new_artifacts[0].path if new_artifacts else ""
-
-    with _experiment_lock(run_dir):
-        reader = ExperimentArtifactReader(run_dir)
-
-        # spec: create once, reuse thereafter
-        spec_path = run_dir / "experiment_spec.json"
-        if spec_path.is_file():
-            spec = reader.load_spec()
-        else:
-            spec = M.experiment_spec_from_project_mapping(
-                {"project": {"name": f"serve__{agent_id}"}},
-                project_file=run_dir / "project.yml",
-                base_dir=run_dir,
-            )
-            spec_path.write_text(M.experiment_spec_to_json(spec), encoding="utf-8")
-
-        # plan trials: merge existing + this one (dedupe by trial_id, this wins)
-        trial_plans_by_id: dict[str, Any] = {}
-        try:
-            for tp in reader.load_plan().trials:
-                trial_plans_by_id[tp.trial_id] = tp
-        except Exception:  # noqa: BLE001 — first submission, no plan yet
-            pass
-        trial_plans_by_id[trial_id] = M.TrialPlan(
-            trial_id=trial_id, subject_id="serve", task_id=chal_id, pass_index=0
-        )
-        plan = M.ExperimentPlan(
-            schema_version="experiment_plan.v1",
-            plan_id=f"plan_{experiment_run_id}",
-            source=M.PlanSource(project_file=str(run_dir / "project.yml"), benchmark_id=benchmark),
-            subjects=(M.SubjectPlan(subject_id="serve", agent=agent_id, kind="serve", profile="", model=""),),
-            tasks=(),
-            trials=tuple(trial_plans_by_id.values()),
-            controls=spec.protocol,
-        )
-
-        # artifact index: merge existing + new (dedupe by artifact_id)
-        artifacts_by_id: dict[str, Any] = {}
-        try:
-            for art in reader.load_artifact_index().artifacts:
-                artifacts_by_id[art.artifact_id] = art
-        except Exception:  # noqa: BLE001
-            pass
-        for art in new_artifacts:
-            artifacts_by_id[art.artifact_id] = art
-
-        record = M.create_experiment_record(
-            plan,
-            run_id=experiment_run_id,
-            created_at=created_at_iso,
-            status="completed",
-            trial_record_refs={t: f"trials/{t}/record.json" for t in trial_plans_by_id},
-        )
-        trial_record = M.TrialRecord(
-            schema_version="trial_record.v1",
-            trial_id=trial_id,
-            run_id=experiment_run_id,
-            plan_ref="experiment_plan.json",
-            status="completed",
-            status_reason="",
-            subject_id="serve",
-            task_id=chal_id,
-            pass_index=0,
-            artifacts=new_artifacts,
-            scoring=M.TrialScoringRecord(status="scored", score_ref=primary_score_ref),
-        )
-
-        (run_dir / "experiment_plan.json").write_text(M.experiment_plan_to_json(plan), encoding="utf-8")
-        (run_dir / "experiment_record.json").write_text(M.experiment_record_to_json(record), encoding="utf-8")
-        (run_dir / "artifact_index.json").write_text(
-            M.artifact_index_to_json(M.ArtifactIndex(artifacts=tuple(artifacts_by_id.values()))),
-            encoding="utf-8",
-        )
-        (trial_dir / "record.json").write_text(M.trial_record_to_json(trial_record), encoding="utf-8")
+    if not judge:
+        return ()
+    models = judge.get("models")
+    ids: list[str] = []
+    if isinstance(models, list):
+        for m in models:
+            if isinstance(m, str) and m:
+                ids.append(m)
+            elif isinstance(m, dict):
+                for k in _JUDGE_MODEL_KEYS:
+                    if m.get(k):
+                        ids.append(str(m[k]))
+                        break
+    else:
+        for k in _JUDGE_MODEL_KEYS:
+            if judge.get(k):
+                ids.append(str(judge[k]))
+                break
+    return tuple(ids)
 
 
 def score_submission(
@@ -441,28 +306,30 @@ def score_submission(
     challenge: dict[str, Any],
     *,
     agent_id: str = "local",
+    label: str = "",
     judge: dict[str, Any] | None = None,
-    runs_root: str | Path | None = None,
+    serve_root: str | Path | None = None,
     output: str = "",
     now: float | None = None,
     uuid_hex: str | None = None,
 ) -> dict[str, Any]:
     """Score one serve-only submission against a still-running instance.
 
-    ``run_id`` is the launched *instance* id being scored. ``agent_output_dir``
-    is the unpacked submission (its ``final_answer/`` dir holds the per-vuln
-    reports for web challenges; ignored for marker-only post-exploitation
-    challenges, which read the live target). ``instance`` is the running-instance
-    registry value; ``challenge`` is the discovered ``NormalizedChallenge`` dict.
-    ``agent_id`` identifies the external agent — the serve session is ONE
-    experiment per agent, and this submission becomes one trial appended to it.
-    ``judge`` (optional) is the judge-model config injected into the benchmark
-    for the ``LLM_judge`` signal — omit it and ``LLM_judge`` vulns report
-    "no judge model configured" (verifier-only).
+    ``run_id`` is the launched *instance* id being scored (the target-launch id
+    a verdict is meaningful relative to). ``agent_output_dir`` is the unpacked
+    submission (its ``final_answer/`` dir holds the per-vuln reports for web
+    challenges; ignored for marker-only post-exploitation challenges, which read
+    the live target). ``instance`` is the running-instance registry value;
+    ``challenge`` is the discovered ``NormalizedChallenge`` dict. ``agent_id``
+    identifies the external client (self-declared). ``label`` is an optional,
+    caller-supplied human name for easy lookup — it prefixes the record's
+    directory and is stored on the record, but is NOT an identity (the machine
+    primary key is the submission id). ``judge`` (optional) is the judge-model
+    config injected into the benchmark for the ``LLM_judge`` signal.
 
-    Returns a verdict dict: ``{run_id, chal_id, benchmark_module, scores,
-    evidence, run_dir}``. Persists an inspectable trial into the agent's
-    experiment run under ``.cage_runs``.
+    Writes a serve-native submission record under ``.cage_serve/<client_id>/
+    <label?>__<submission_id>/`` (see :mod:`cage.target.server.serve_log`) with
+    the agent findings persisted, then returns a verdict dict.
     """
     agent_output_dir = Path(agent_output_dir)
     bench_module = resolve_benchmark_module(challenge)
@@ -480,73 +347,136 @@ def score_submission(
     )
     evidence = scorer.gather(runtime)
 
-    # (6) persist this submission as one trial in the AGENT's experiment run.
-    # Layout ``.cage_runs/serve__<agent_id>/serve/trials/<trial_id>/`` — one
-    # experiment per external agent (the depth the inspector scans; subject is a
-    # single path segment mirroring a cage-run agent label). Every submission
-    # appends a trial, so the run accumulates the agent's challenges over time.
+    # Identities. The submission id embeds the challenge + target-launch id so it
+    # is traceable to the exact boot it scored; the label is a human alias only.
     chal_id = str(instance.get("chal_id") or challenge.get("id") or run_id)
-    benchmark_name = str(challenge.get("benchmark") or challenge.get("benchmark_name") or chal_id)
-    subject = f"serve__{agent_id}"
-    experiment_run_id = "serve"
-    # trial id is unique per submission (challenge + instance + nonce) and sorts
-    # by challenge in the inspector.
+    client_id = agent_id or "local"
     hexpart = uuid_hex or uuid.uuid4().hex[:8]
-    trial_id = f"{chal_id}__{run_id}_{hexpart}"
-    runs_root = Path(runs_root) if runs_root is not None else (
-        bench_module.parent / ".cage_runs"
+    submission_id = f"{chal_id}__{run_id}_{hexpart}"
+    root = (
+        Path(serve_root)
+        if serve_root is not None
+        else bench_module.parent / serve_log.SERVE_ROOT_DIRNAME
     )
-    run_dir, trial_dir = _persist_run(
-        runs_root, subject, experiment_run_id, trial_id,
-        sample=sample, output=output, evidence=evidence,
+    sub_dir = serve_log.submission_dir(root, client_id, submission_id, label)
+    sub_dir.mkdir(parents=True, exist_ok=True)
+
+    # Persist the scorer-visible inputs (findings included) BEFORE score(), so the
+    # LLM judge reads workspace/final_answer and an offline re-judge later has its
+    # inputs. Fixes the serve bug where the upload was deleted before the judge
+    # could read it.
+    submission_meta = serve_log.persist_inputs(
+        sub_dir,
+        sample=sample,
+        output=output,
+        evidence=evidence,
+        agent_output_dir=agent_output_dir,
     )
 
-    # (5) score offline
+    # (5) score offline — trial_dir is the serve submission dir, so the scorer's
+    # judge reads workspace/final_answer and writes scores/judge_io.jsonl here.
     ctx = ScoringContext(
-        trial_id=trial_id,
+        trial_id=submission_id,
         trial_index=0,
         sample=sample,
         output=output,
         exit_code=0,
-        trial_dir=trial_dir,
-        run_dir=run_dir,
-        canonical_trial_id=trial_id,
+        trial_dir=sub_dir,
+        run_dir=root,
+        canonical_trial_id=submission_id,
     )
     scores = scorer.score(ctx)
     scores_out = {name: _score_to_dict(score) for name, score in (scores or {}).items()}
 
-    scores_dir = trial_dir / "scores"
+    scores_dir = sub_dir / "scores"
     scores_dir.mkdir(parents=True, exist_ok=True)
+    score_refs: dict[str, str] = {}
     for name, payload in scores_out.items():
         safe = name.replace("/", "_")
-        # Nest under the scorer name — the shape the inspector reads
-        # (``{"<scorer>": {value, answer, explanation, metadata}}``).
-        (scores_dir / f"{safe}.json").write_text(
+        rel = f"scores/{safe}.json"
+        # Nested under the scorer name — ``{"<scorer>": {value, answer, …}}``.
+        (sub_dir / rel).write_text(
             json.dumps({name: payload}, ensure_ascii=False), encoding="utf-8"
         )
+        score_refs[name] = rel
+    canonical_score_ref = next(iter(score_refs.values()), "")
 
-    # Append this trial to the agent's experiment so `cage inspect` renders it.
-    # Best-effort — a records failure must never sink the verdict just computed.
-    stamp = time.gmtime(now if now is not None else time.time())
+    # Timestamps + provenance.
+    ts = now if now is not None else time.time()
+    score_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+    grader = serve_log.build_grader(challenge, sample)
+    inputs_digest = serve_log.compute_inputs_digest(
+        evidence, submission_meta.findings_digest
+    )
+    target_launch = serve_log.build_target_launch(
+        launch_id=run_id, challenge_id=chal_id, instance=instance, sample=sample,
+    )
+    prompt_level = str(instance.get("prompt_level") or "")
     try:
-        _append_trial_to_experiment(
-            run_dir, trial_dir,
-            experiment_run_id=experiment_run_id,
-            trial_id=trial_id, chal_id=chal_id, agent_id=agent_id,
-            benchmark=benchmark_name,
-            scores_out=scores_out,
-            created_at_iso=time.strftime("%Y-%m-%dT%H:%M:%SZ", stamp),
+        prompt_text, _ = render_task_prompt(
+            run_id, instance, challenge, prompt_level=prompt_level or "l0"
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("serve submission canonical records skipped: %s", exc)
+    except Exception:  # noqa: BLE001 — provenance nicety, never sinks a verdict
+        prompt_text = ""
+    prompt_served = serve_log.PromptServed(
+        level=prompt_level,
+        digest=serve_log.prompt_digest(prompt_text) if prompt_text else "",
+    )
+
+    judge_models = _judge_model_ids(judge)
+    pass_id = serve_log.make_pass_id(judge_models, score_time)
+    provenance = serve_log.PassProvenance(
+        mode="serve",
+        challenge_id=chal_id,
+        target_launch_id=run_id,
+        project_name=target_launch.project_name,
+        launch_time=target_launch.launch_time,
+        client_id=client_id,
+        prompt_level=prompt_level,
+        prompt_digest=prompt_served.digest,
+        inputs_digest=inputs_digest,
+        grader=grader,
+        judge_models=judge_models,
+        score_time=score_time,
+    )
+    score_pass = serve_log.ScorePass(
+        pass_id=pass_id,
+        judge_models=judge_models,
+        score_time=score_time,
+        score_ref=canonical_score_ref,
+        scores=scores_out,
+        provenance=provenance,
+    )
+    record = serve_log.ServeSubmissionRecord(
+        submission_id=submission_id,
+        client_id=client_id,
+        challenge_id=chal_id,
+        benchmark_module=str(bench_module),
+        created_at=score_time,
+        target_launch=target_launch,
+        prompt_served=prompt_served,
+        submission=dataclasses.replace(submission_meta, received_at=score_time),
+        grader=grader,
+        inputs_digest=inputs_digest,
+        canonical_pass_id=pass_id,
+        label=serve_log.sanitize_label(label),
+        passes=(score_pass,),
+    )
+    serve_log.write_record(sub_dir, record)
 
     return {
         "run_id": run_id,
         "chal_id": chal_id,
         "benchmark_module": str(bench_module),
-        "trial_id": trial_id,
+        "submission_id": submission_id,
+        "trial_id": submission_id,  # back-compat alias
+        "label": record.label,
         "scores": scores_out,
         "evidence": evidence,
-        "run_dir": str(run_dir),
-        "scored_at": now if now is not None else time.time(),
+        "run_dir": str(sub_dir),  # back-compat: the inspectable submission dir
+        "submission_dir": str(sub_dir),
+        "pass_id": pass_id,
+        "inputs_digest": inputs_digest,
+        "scored_at": ts,
     }

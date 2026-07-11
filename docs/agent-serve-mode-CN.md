@@ -99,6 +99,12 @@ cage benchmark serve agent_pentest_bench
 
 该命令自动发现并挂载此 benchmark 的全部题目索引(`web_exploit_bench` 与 `post_exploit_bench`)。裁判模型可经 `--judge-model <id>` 覆盖(见第 2 节);对外暴露(供他机访问)可用 `--host 0.0.0.0 --external-token "$(openssl rand -hex 16)"`。
 
+其他可用参数:
+
+- `--namespace <name>`(缺省 `default`)——本服务靶标所归属的 docker 资源命名空间。两台同机并跑的服务各取不同命名空间,其容器 / 网络即可相互隔离。
+- `--adapter path/to/module.py:ClassName`——额外加载一个 benchmark adapter(可重复),补充在 benchmark 目录下自动发现之外的适配器。
+- `--open`——启动后在浏览器中打开只读控制台。
+
 ## 4 评测回路(Python SDK)
 
 为避免手工构造 HTTP 与 multipart 报文,建议使用随仓库提供的**纯标准库**客户端(`from cage.target.serve_client import ServeClient`;亦可将单文件 `cage/target/serve_client.py` 直接复制入 Agent 工程):
@@ -208,7 +214,7 @@ SDK 各调用(`list_challenges` / `launch` / `session` / `task_prompt` / `attach
 
 ## 6 评测结果的持久化与可视化
 
-每次 submit 将作为一条 trial 持久化至 `.cage_runs/serve__<client_id>/serve/`——即 **inspector 所读取的同一 `.cage_runs` 目录树**,故 `cage inspect` 会将其与 `cage run` 的结果并列展示。就语义而言,一次被服务的 benchmark 对应"每个外部 Agent 一个实验"(不同 `client_id` 各自拥有独立的评测 run),每次 submit 向其追加一条 trial。
+每次 submit 将作为一条 trial 持久化至 `.cage_runs/serve__agent_<client_id>/serve/`(服务端会在 client id 前加 `agent_` 前缀)——即 **inspector 所读取的同一 `.cage_runs` 目录树**,故 `cage inspect` 会将其与 `cage run` 的结果并列展示。就语义而言,一次被服务的 benchmark 对应"每个外部 Agent 一个实验"(不同 `client_id` 各自拥有独立的评测 run),每次 submit 向其追加一条 trial。
 
 调用方获得的是**判定(verdict)而非轨迹(trajectory)**:`trials/<id>/scores/<scorer>.json` 载有完整判分细节(逐漏洞的 `passed` / `verifier_status` / `judge_status`,以及原始的 `verifier_results` 与 `judge_findings`),`submit` 的返回值即为同一份数据。由于 CAGE 从未运行该 Agent,故**不存在逐步的 LLM / 工具调用轨迹**——此为 serve 模式的固有局限。如需轨迹,应改用[集成式](agent-cage-managed-CN.md)。
 

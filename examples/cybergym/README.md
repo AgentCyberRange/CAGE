@@ -70,9 +70,9 @@ cage model set glm-5.1 --provider openai --model GLM-5.1 \
 cage model list
 ```
 
-The default configs run the `claude_code` agent on a prebuilt image
-(`pursu1ng/cage-images:claude-code-latest`) — pull it, or point the config at
-your own. If the agent container can only reach your model through a host proxy,
+The default configs run the `claude_code` agent on the `cage/claude-code:pentestenv`
+image — build it with `cage agent build --agent claude_code --variant pentestenv`,
+or point the config at your own. If the agent container can only reach your model through a host proxy,
 uncomment `proxy.upstream_http_proxy: http://172.17.0.1:7890` in the config.
 
 ## 3. Smoke-test one task

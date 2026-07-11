@@ -10,11 +10,9 @@ lock the synthesis + the read-only gallery contract, with no Docker / no server.
 
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 
-from cage.web import app as webapp
 from cage.web.app import (
     _CAIRN_STATIC_DIR,
     _cairn_gallery_projects,

@@ -58,10 +58,10 @@ cage agent build --agent qitos   # docker/qitos/build.sh  -> qitos/Dockerfile
 |---|---|---|---|
 | `claude_code/pentestenv.Dockerfile` | claude_code | ★ default | `pursu1ng/cage-images:pentest-env` |
 | `claude_code/cyberdebug.Dockerfile` | claude_code | variant | `cybergym/oss-fuzz-base-runner` |
-| `claude_code/openviking.Dockerfile` | claude_code | variant | `pursu1ng/cage-images:claude-code-latest` |
+| `claude_code/openviking.Dockerfile` | claude_code | variant | `cage/claude-code:pentestenv` |
 | `claude_code/Dockerfile` | claude_code | base layer | `ubuntu:22.04` |
-| `codex/Dockerfile` | codex | ★ default | `ubuntu:22.04` |
-| `codex/pentestenv.Dockerfile` | codex | variant | `pursu1ng/cage-images:pentest-env` |
+| `codex/pentestenv.Dockerfile` | codex | ★ default | `pursu1ng/cage-images:pentest-env` |
+| `codex/Dockerfile` | codex | base layer | `ubuntu:22.04` |
 | `gemini_cli/pentestenv.Dockerfile` | gemini_cli | ★ default | `pursu1ng/cage-images:pentest-env` |
 | `hermes/pentestenv.Dockerfile` | hermes | ★ default | `pursu1ng/cage-images:pentest-env` |
 | `hermes/openviking.Dockerfile` | hermes | variant | `cage/hermes:pentestenv` |
@@ -70,7 +70,7 @@ cage agent build --agent qitos   # docker/qitos/build.sh  -> qitos/Dockerfile
 | `custom_langgraph/Dockerfile` | custom_langgraph | trace runtime | `pursu1ng/cage-images:pentest-env` |
 | `cairn/Dockerfile` | cairn | custom (engine) | `ubuntu:22.04` |
 | `cairn/worker.Dockerfile` | cairn | custom (worker) | `${BASE}` |
-| `qitos/Dockerfile` | qitos | custom | `pursu1ng/ctfenv:latest` |
+| `qitos/Dockerfile` | qitos | custom | `ubuntu:22.04` |
 
 Base images a Dockerfile `FROM`-s (`pursu1ng/cage-images:pentest-env`,
 `cybergym/oss-fuzz-base-runner`, …) are pulled from a registry; the images built

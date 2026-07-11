@@ -20,7 +20,6 @@ loop, tool use, submission and stop. The pure helper below is unit-tested; the
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 

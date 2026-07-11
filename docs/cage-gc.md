@@ -69,10 +69,16 @@ CAGE_STARTUP_GC=0 python -m cage.target.serve …
 Without `--apply`, `cage gc` only reports. No docker commands run.
 Use this to verify the classification before committing to a removal.
 
+There is a second safety fallback: if auto-discovery finds **no** `.cage_runs/`
+under the cwd or any ancestor cage source tree (and none was passed with
+`--root` / `$CAGE_RUNS_ROOT`), GC has no artifact dir to judge aliveness
+against, so it treats **every** run_id as ALIVE and `--apply` becomes a no-op.
+It warns on stderr rather than reclaiming resources it can't reason about.
+
 ### 2. `--namespace` is namespace-scoped, agent containers are not.
 
 The namespace filter restricts target-side resources
-(`cage.target_server.namespace=<ns>`). Agent containers (the ones
+(`cage.target.namespace=<ns>`). Agent containers (the ones
 running the LLM agent CLI) do **not** carry namespace labels, so they
 are always swept by `cage.run_id` alone whenever the run is classified
 non-alive. This is intentional: agent containers belong to the

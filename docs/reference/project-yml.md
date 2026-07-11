@@ -145,10 +145,43 @@ models:
 | `input_cost_per_1m` | Input token price per 1M tokens |
 | `output_cost_per_1m` | Output token price per 1M tokens |
 | `extra_headers` | Headers attached to upstream model requests |
+| `max_context_size` | Endpoint's real context window in tokens (alias `context_window_size`); `null`/unset ⇒ each agent keeps its CLI's own default. The Claude Code CLI has no window knob, so it cannot honour this |
+| `reserved_context_size` | Headroom (tokens) an agent reserves for its next response; `null`/unset ⇒ CLI default |
+| `rl_reward_sink` | RL-training URL. When set, this model runs in RL mode: every LLM call carries an `X-Trial-Id` header and each finished trial's reward is POSTed here. Empty ⇒ ordinary model. Also settable via `cage model set --rl-reward-sink` |
+| `extra` | Inference knobs routed into the upstream OpenAI/vLLM request body — see below |
 
-`provider` also defines protocol. `openai` and `vllm` use OpenAI protocol;
-`anthropic` uses Anthropic protocol. The proxy can translate when an agent and
-model use different protocols.
+`provider` also defines protocol. `openai`, `vllm`, and `sglang` use OpenAI
+protocol; `gemini`/`google` use the Google protocol; everything else
+(`anthropic`, …) uses Anthropic protocol. The proxy can translate when an agent
+and model use different protocols. Note: `cage model set --provider` only
+accepts `openai|anthropic|vllm`; `gemini`/`google`/`sglang` must be hand-edited
+into `config/models.yml`.
+
+### Model `extra` (upstream inference knobs)
+
+`extra` carries per-request body fields the proxy merges into an OpenAI/vLLM
+upstream call — letting the registry pin inference knobs the agent CLI cannot
+express itself (e.g. Qwen's `enable_thinking`, or recommended sampling). These
+are applied even on the anthropic→openai translation path, so a Claude-Code-driven
+run can talk to a vLLM model with a fixed inference config.
+
+```yaml
+models:
+  qwen3-coder:
+    provider: vllm
+    model: qwen3-coder
+    base_url: http://<host>:8000/v1
+    extra:
+      enable_thinking: false          # shorthand → chat_template_kwargs
+      temperature: 0.7                 # sampling: top_p/top_k/*_penalty too
+      chat_template_kwargs: {}         # merged with enable_thinking
+      extra_body: {}                   # raw passthrough (lowest precedence)
+```
+
+Recognized `extra` keys: `extra_body` (raw dict), the sampling keys
+`temperature`/`top_p`/`top_k`/`presence_penalty`/`frequency_penalty`,
+`chat_template_kwargs`, and the `enable_thinking` shorthand. `{}` ⇒ nothing
+injected.
 
 Keep endpoint identity separate from agent-specific launch strings. For
 example, Claude Code can use decorated model names such as
@@ -186,6 +219,7 @@ eval:
 | `benchmark.class` | Optional class name; required if multiple benchmarks exist |
 | extra keys | Passed to the benchmark constructor |
 | `limit` | Optional sample limit loaded into the benchmark |
+| `sample_slice` | Optional Python-style slice over the ordered (id-filtered) sample list — e.g. `":100"` first 100, `"-100:"` last 100, `"100:200"` a window, `"::2"` every other, `"5"` the 6th, `"-1"` the last |
 
 CAGE resolves `.cage_runs` under the benchmark module directory, not under an
 arbitrary config subdirectory. For `examples/agent_pentest_bench/default_web_exploit.yml`, runs
@@ -215,7 +249,9 @@ agents:
 | Field | Meaning |
 |---|---|
 | `id` | Stable id used by `cage run --agent` |
-| `kind` | Registered agent adapter, e.g. `codex`, `claude_code` |
+| `kind` | Registered agent adapter, e.g. `codex`, `claude_code`. Omit when using `source` |
+| `source` | Path to a **custom-agent** directory (holding `agent.yml` + code) loaded instead of a built-in `kind`. Resolved relative to the experiment file's directory |
+| `params` | Optional dict filling the custom agent's manifest params (also via CLI `--param KEY=VALUE`) |
 | `model` | Model id from `config/models.yml` |
 | `models` | List of model ids; CAGE expands one logical agent across these models |
 | `image` | Docker image to run |
@@ -242,10 +278,10 @@ agents:
     models:
       - claude-opus-sub
       - claude-opus
-      - id: deepseek-v4-pro
-        extra_env:
-          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
-          DISABLE_INTERLEAVED_THINKING: "1"
+      - deepseek-v4-pro
+    extra_env:
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
+      DISABLE_INTERLEAVED_THINKING: "1"
     image: cage/claude-code:pentestenv
     home: /home/agent/workspace
     session_args:
@@ -254,10 +290,56 @@ agents:
       - --verbose
 ```
 
+`models` is a plain list of model ids; CAGE runs one independent
+`agent × model` trial matrix over them. `extra_env` (and other launch knobs)
+belong at the **agent** level, not on a per-model entry. A `models` entry may
+be a dict only to carry `id`/`model` or a `sources` pool (see below) — no other
+per-model launch keys are read there.
+
 WebExploitBench and PostExploitBench both need this shape. The agent is inside
 the CAGE sandbox, so repeated interactive permission prompts only make the run
 less reproducible. Other built-in coding agents wire their own headless
 approval mode in the adapter.
+
+### Multi-endpoint models (`sources`)
+
+A `models` entry may declare `sources` — several registered endpoints the run
+round-robins across per trial (load balancing over identical model deployments).
+When `sources` is set, the entry **must** set an explicit `id` (the logical key
+that groups the run dir / labels / scores; it need not itself be registered),
+and all sources must share one protocol.
+
+```yaml
+agents:
+  - id: qwen_code
+    kind: qwen_code
+    models:
+      - id: qwen3-coder            # logical key
+        sources:
+          - qwen3-coder-node-a:6   # `id:N` pins per-source concurrency
+          - qwen3-coder-node-b:6
+          - id: qwen3-coder-node-c # dict form, default even share
+            concurrency: 4
+```
+
+Each source is `<model_id>`, the `<model_id>:N` short form, or
+`{id: <model_id>, concurrency: N}`. Absent concurrency ⇒ the source takes the
+default even share of the run's total.
+
+### Custom agents (`source`)
+
+Instead of a built-in `kind`, an agent entry may point `source` at a
+self-contained custom-agent directory (its own `agent.yml` manifest + code):
+
+```yaml
+agents:
+  - id: cairn
+    source: ../../cage/agents/custom/cairn   # dir with agent.yml
+    params:
+      workers: 4                              # fills a manifest param
+    models:
+      - glm-5.1
+```
 
 ## `subjects`
 
@@ -324,6 +406,8 @@ target:
 | `compose_up_timeout` | `docker compose up` timeout |
 | `target_scope` | `per_agent`, `per_challenge`, or benchmark default |
 | `parallel_mode` | `network`, `alias`, or benchmark default |
+| `network_mode` | Compose launch mode: `""` \| `compose_project_local` \| `shared_external`. Challenge-declared value wins; empty ⇒ server default (`compose_project_local`) |
+| `exposure_mode` | Service exposure: `""` \| `host_ports` \| `internal`. Challenge-declared value wins; empty ⇒ server default (`host_ports`) |
 | `agent_network_isolation` | `per_trial_bridge` or `trust_server` |
 
 `target.server_url` and `target.embedded` are not user-facing fields. CAGE
@@ -341,7 +425,13 @@ runtime:
   max_input_tokens: null
   max_output_tokens: null
   max_cost: null
-  agent_network_mode: bridge
+  agent_network_mode: host
+  store_proxy: true
+  chunk_size: null
+  max_trial: null
+  wait_for_model: false
+  wait_timeout: 0.0
+  wait_interval: 10.0
   live_check:
     enabled: false
 ```
@@ -352,13 +442,18 @@ runtime:
 | `max_target_setups` | Concurrent target setup/readiness cap |
 | `timeout` | Per-trial wall-clock timeout in seconds; `0` means unlimited |
 | `on_failure` | Failure policy; default is `continue` |
-| `agent_network_mode` | Agent container network mode |
+| `agent_network_mode` | Agent container network mode; resolved default is `host` |
 | `max_rounds` | Model-call round budget. See the value table below. |
 | `max_input_tokens` | Cumulative input token budget per trial; `null`/unset means unlimited |
 | `max_output_tokens` | Cumulative output token budget per trial; `null`/unset means unlimited |
 | `max_cost` | Cumulative per-trial USD budget; `null`/unset means unlimited |
 | `passk` | Independent attempts per sample |
-| `store_proxy` | Whether to store proxy artifacts |
+| `store_proxy` | Whether to store proxy artifacts. Effective default when unset is **`true`** (the loader defaults the yaml key on) |
+| `chunk_size` | Optional trial-batching chunk size; `null`/unset processes all trials in one batch |
+| `max_trial` | Per-invocation execution cap: run only trials whose global index is `< max_trial`, leaving the rest pending (batch with `--resume`); `null`/unset runs all |
+| `wait_for_model` | Poll self-hosted (`vllm`/`sglang`) endpoints until they answer before starting; CLI `--wait-for-model` overrides. Default `false` |
+| `wait_timeout` | Readiness-wait timeout in seconds; `0` waits indefinitely (default `0`) |
+| `wait_interval` | Seconds between readiness polls (default `10`) |
 | `live_check` | Online success checking behavior |
 
 `max_rounds` counts successful non-compact agent decision rounds. Failed
@@ -422,12 +517,22 @@ resume:
     - target_unavailable
     - model_bad_gateway
   max_attempts: 3
+  select:
+    id_matches: "arvo_1[0-9]{3}"     # only re-run trials whose id matches
+  keep_if:
+    min_rounds: 100                  # don't re-run trials that got this far
+    min_duration_s: 600
+    id_matches: "arvo_1507"
 ```
 
 | Field | Meaning |
 |---|---|
 | `retry_reasons` | Extra termination reasons to retry under `--resume` |
 | `max_attempts` | Total attempts per trial; `0` means unlimited |
+| `select.id_matches` | Positive id-regex gate: only trials whose id matches are eligible for re-run |
+| `keep_if.min_rounds` | Veto: keep (don't re-run) an otherwise-retryable trial that reached at least this many rounds |
+| `keep_if.min_duration_s` | Veto: keep a trial that ran at least this long (seconds) |
+| `keep_if.id_matches` | Veto: keep trials whose id matches this regex |
 
 Preview resume:
 
@@ -492,6 +597,12 @@ cage run examples/agent_pentest_bench/default_web_exploit.yml --prompt-level l0,
 cage run examples/agent_pentest_bench/default_web_exploit.yml --max-sample-num 5
 cage run examples/agent_pentest_bench/default_web_exploit.yml --run-id smoke-001 --resume --dry-run
 ```
+
+`--prompt-level` is **not** a core `cage run` flag — it is a *benchmark-declared*
+CLI option (a `BenchmarkOption` the benchmark registers via `cli_options()`,
+mapped to a project.yml field). It only exists when the benchmark implements it
+(agent_pentest_bench does); against a benchmark that doesn't, the flag is
+unknown. Custom-agent params use the core `--param KEY=VALUE` flag instead.
 
 ## Related Docs
 

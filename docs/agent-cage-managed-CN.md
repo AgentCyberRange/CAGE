@@ -5,8 +5,8 @@
 手把手把**你写的自定义 Agent** 接到 `agent_pentest_bench` 上,跑一个真实靶标,在
 inspector 里看它得分。下面每条命令都能照抄——benchmark、sample、model 全是真的。
 
-- 想跑**现成**的 codex / claude_code,看 [benchmark 的 README](../examples/agent_pentest_bench/README.md);这里讲的是**加你自己的**。
-- 仓库里已有的自定义 agent 真身,照着抄最省:[`qitos`](../cage/agents/custom/qitos/README.md)(单镜像,最简单)、[`cairn`](../cage/agents/custom/cairn/README.md)(多镜像 DinD)。你的 agent 就跟它们并排放。
+- 想跑**现成**的 codex / claude_code,看 [benchmark 的 README](https://github.com/AgentCyberRange/CAGE/blob/main/examples/agent_pentest_bench/README.md);这里讲的是**加你自己的**。
+- 仓库里已有的自定义 agent 真身,照着抄最省:[`qitos`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/qitos/README.md)(单镜像,最简单)、[`cairn`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/cairn/README.md)(多镜像 DinD)。你的 agent 就跟它们并排放。
 
 > **唯一的硬规矩:** 你的模型客户端必须调 Cage 给的 `{base_url}`(容器内的 proxy),
 > 每次调用才会被拦截、记录、打分。硬编码别的地址 = 什么都记不到、打不了分。
@@ -44,7 +44,7 @@ cage/agents/custom/<your_agent_name>/
 ## 2. 构建 dockerfile `docker/<your_agent_name>/Dockerfile`
 
 agent 在容器里跑,你得给它一个镜像——**自己写一个 Dockerfile**,装好你的依赖、再满足
-Cage 的容器约定。照抄 qitos 的 [`docker/qitos/Dockerfile`](../docker/qitos/Dockerfile) 最省。
+Cage 的容器约定。照抄 qitos 的 [`docker/qitos/Dockerfile`](https://github.com/AgentCyberRange/CAGE/blob/main/docker/qitos/Dockerfile) 最省。
 约定就这几条:
 
 ```dockerfile
@@ -108,8 +108,12 @@ env:
   转义)、`{model_name}` / `{api_key}`、`{base_url}`(proxy 地址,OpenAI 协议带 `/v1`)、
   `{workspace_dir}`(`/home/agent/workspace`)、`{max_rounds}`(轮次上限)。其余任何
   `{xxx}` 都是你自己的 param,`--param k=v` 覆盖。
-- **照抄一个真实的:** [`qitos/agent.yml`](../cage/agents/custom/qitos/agent.yml)(单镜像,
-  最接近这个模板)、[`cairn/agent.yml`](../cage/agents/custom/cairn/agent.yml)(带 `build:`
+- **一个概念只留一个旋钮。** 轮次、model、base_url、api_key、workspace 都归 Cage
+  管、各有唯一入口(轮次走 `max_rounds` / `--max-rounds`,model 走模型配置)。`params`
+  若重用某个保留 token 名(或以 `model.` 前缀打头),会在 manifest **加载时直接报错**
+  ——请在 `command` 里直接用那个保留 `{token}`,别把它再做成一个 param。
+- **照抄一个真实的:** [`qitos/agent.yml`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/qitos/agent.yml)(单镜像,
+  最接近这个模板)、[`cairn/agent.yml`](https://github.com/AgentCyberRange/CAGE/blob/main/cage/agents/custom/cairn/agent.yml)(带 `build:`
   脚本 + 多镜像)。
 
 ## 4. 接进 `default_post_exploit.yml`
