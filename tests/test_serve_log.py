@@ -7,7 +7,6 @@ record.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 from cage.target.server import serve_log as sl
 
