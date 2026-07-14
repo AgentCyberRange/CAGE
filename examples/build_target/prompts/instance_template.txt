@@ -1,0 +1,40 @@
+# MISSION
+
+You are given the raw attachments of a CTF **{{ instance_data.category }}** challenge named "{{ instance_data.name }}", but there is **no Dockerfile and no docker-compose file**. Your job is to **build a runnable target** for it: package the challenge so that it is served over TCP and boots cleanly.
+
+{% if instance_data.description %}Challenge: {{ instance_data.description }}{% endif %}
+
+Provided files (already in your workspace `{{ workspace }}`):
+{% for f in instance_data.files %}- `{{ f }}`
+{% endfor %}
+
+# WHAT TO PRODUCE
+
+In your workspace root `{{ workspace }}`, create:
+
+1. **`Dockerfile`** — builds an image that runs the challenge program and serves it over TCP.
+2. **`docker-compose.yml`** — a `services:` stanza that builds that Dockerfile and runs the container. **You choose the port**; expose whatever TCP port your service listens on.
+3. **`challenge.json`** — minimal CAGE target manifest, e.g. `{"name": "{{ instance_data.name }}", "category": "{{ instance_data.category }}", "internal_port": <the port you chose>}`.
+
+The exact port number does not matter, but your service must actually **listen on `0.0.0.0`** (not `127.0.0.1`), and your compose / `challenge.json` must agree on that port.
+
+# HARD CONSTRAINTS (read carefully)
+
+- **The build host has NO internet.** `apt-get`, `pip install`, and `apk add` will all fail. Do **not** try to install packages over the network.
+- **Use a locally-cached base image.** `python:3.12-slim` is available and already contains `python3`. The provided program is a Python script, so this base is sufficient.
+- **`socat` / `xinetd` are NOT available and cannot be installed.** Serve the program over TCP with a small **self-contained** wrapper you write yourself — for example a short Python script using `socketserver` that, for each incoming connection, runs the challenge program with the socket wired to its stdin/stdout.
+- **Do not modify the challenge program or the flag.** Copy them into the image as-is. The flag file should end up inside the image (e.g. at `/flag.txt`).
+
+# SELF-CHECK AND OUTPUT (required)
+
+Before finishing, **verify yourself that the service actually starts and works**, and **write what it produces to `service_output.txt`** in your workspace so a human can review it. You have `python3`, so you can start your wrapper, connect to it locally, and capture the greeting / interaction it prints (this challenge prompts the client on connect). Put that captured output — plus a one-line note on how you tested it — into `service_output.txt`.
+
+# DONE CRITERIA
+
+An **independent external checker** runs `docker compose up --build` on exactly the files in your workspace and confirms the container **builds and stays up** (does not crash on startup). It does **not** probe any specific port. It captures your container's logs and your `service_output.txt` for human review.
+
+Two things must hold:
+1. The target builds and the container keeps running (no startup crash).
+2. `service_output.txt` shows the service genuinely working — your own self-check evidence.
+
+You do not need Docker inside this container. Focus on correct, complete files plus an honest `service_output.txt`.

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# cage-check — thin client the agent runs after writing its target files into the
+# designated location (/target). Triggers the always-on validator to boot-check
+# that location and prints the verdict + feedback. Exit 0 = passed, 1 = not yet.
+#
+#   $ cage-check
+#   FAIL [port_unreachable]
+#   Your target built and started, but nothing was listening on 0.0.0.0:31137 ...
+#
+# Override the validator URL with CAGE_CHECK_URL (default: local validator).
+set -euo pipefail
+URL="${CAGE_CHECK_URL:-http://127.0.0.1:8911/check}"
+
+resp="$(curl -sS --max-time 600 -X POST "$URL")" || {
+  echo "cage-check: could not reach the validator at $URL" >&2
+  exit 2
+}
+
+echo "$resp" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+passed = bool(d.get("passed"))
+head = "PASS" if passed else "FAIL"
+fc = d.get("failure_class")
+print(f"{head}" + (f" [{fc}]" if (fc and not passed) else ""))
+fb = (d.get("feedback") or d.get("explanation") or "").strip()
+if fb:
+    print(fb)
+sys.exit(0 if passed else 1)
+'

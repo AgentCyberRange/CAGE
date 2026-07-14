@@ -1,0 +1,1 @@
+Read README.md first. It gives you the evidence for one real software vulnerability (source, crash log, the compiled target under /out, and possibly the PoC and patch). Analyze the actual bug, then write the ordered set of one-sentence descriptions to ./descriptions.json exactly as README.md specifies.

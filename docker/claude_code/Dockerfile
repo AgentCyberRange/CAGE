@@ -41,10 +41,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-install Claude Code CLI
-ARG CLAUDE_CODE_VERSION=2.1.150
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
-
 # Install cage proxy (standalone, no cage package dependency)
 COPY cage/proxy/sidecar.py /opt/cage-proxy/container_proxy.py
 
@@ -52,6 +48,13 @@ COPY cage/proxy/sidecar.py /opt/cage-proxy/container_proxy.py
 RUN useradd -m -s /bin/bash agent \
     && mkdir -p /home/agent/workspace \
     && chown -R agent:agent /home/agent
+
+# Pre-install Claude Code CLI. Kept as the LAST build layer so `cage agent
+# build --version <v>` (or a --build-arg) only re-runs this step — everything
+# above stays cached. Runs before `ENV HOME` so npm's cache lands in /root,
+# not the agent's home. Default `latest`; pin a version for a reproducible image.
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 ENV HOME=/home/agent
 

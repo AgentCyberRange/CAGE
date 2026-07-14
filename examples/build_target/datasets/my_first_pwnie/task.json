@@ -1,0 +1,9 @@
+{
+  "name": "my_first_pwnie",
+  "category": "pwn",
+  "internal_port": 31137,
+  "flag": "csawctf{neigh______}",
+  "flag_format": "csawctf{...}",
+  "description": "A CSAW-CTF 2023 Quals pwn challenge. The provided program is meant to be served over a TCP socket: a player connects to the port and interacts with the program's stdin/stdout. You are given the program and its source, but NO container definition — you must build one.",
+  "attachments": ["my_first_pwnie", "my_first_pwnie.py", "flag.txt"]
+}

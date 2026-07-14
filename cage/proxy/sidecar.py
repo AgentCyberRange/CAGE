@@ -103,6 +103,39 @@ def _budget_limit_message(signal: dict[str, Any]) -> str:
     return f"Runtime budget reached ({kind}: {current}/{limit}{suffix}). Please stop."
 
 
+def _inject_wrapup_reminder(body: dict[str, Any], message: str) -> bool:
+    """Append a wrap-up ``<system-reminder>`` to the last user turn, in place.
+
+    The wrap-up is a graceful pre-cap flush: unlike the hard ``max_requests``
+    rejection (which returns an error the agent cannot act on), this rides on a
+    request that is STILL forwarded upstream, so the model gets a real turn to
+    finalize its deliverable. Injected into the last ``user`` message so it
+    reaches the agent as an in-turn reminder (mirrors how tool-result reminders
+    are already surfaced). Operates on the Anthropic-shaped body, so it applies
+    uniformly before OpenAI translation and on the byte-for-byte path.
+
+    Returns True if a message was injected.
+    """
+    if not message:
+        return False
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return False
+    block = f"\n\n<system-reminder>\n{message}\n</system-reminder>"
+    for turn in reversed(messages):
+        if not isinstance(turn, dict) or turn.get("role") != "user":
+            continue
+        content = turn.get("content")
+        if isinstance(content, str):
+            turn["content"] = content + block
+        elif isinstance(content, list):
+            content.append({"type": "text", "text": block})
+        else:
+            turn["content"] = block
+        return True
+    return False
+
+
 # ------------------------------------------------------------------ #
 # Protocol translation (Anthropic ↔ OpenAI)
 # ------------------------------------------------------------------ #
@@ -1871,6 +1904,23 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
         self.send_error(HTTPStatus.NOT_FOUND)
 
+    def _maybe_inject_wrapup(self, body: dict[str, Any]) -> bool:
+        """Inject the wrap-up reminder if the agent is in the flush window.
+
+        Fires once ``budgeted_round_count() >= wrapup_at`` (the agent has
+        completed at least that many rounds) and on every remaining request up
+        to the hard cap, so the nudge persists through the wind-down. This runs
+        only on requests that ARE forwarded upstream — the agent gets a real
+        turn to act on it, unlike the ``max_requests`` hard rejection.
+        """
+        wrapup_at = getattr(self.server, "wrapup_at", -1)
+        message = getattr(self.server, "wrapup_message", "")
+        if not isinstance(wrapup_at, int) or wrapup_at <= 0 or not message:
+            return False
+        if self.server.recorder.budgeted_round_count() < wrapup_at:
+            return False
+        return _inject_wrapup_reminder(body, message)
+
     def do_POST(self) -> None:  # noqa: N802
         reserved_budgeted_round = False
         try:
@@ -1930,6 +1980,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             # forwarded byte-for-byte.
             if route == "/v1/messages" and self.server.needs_translation:
                 body = json.loads(raw_body)
+                self._maybe_inject_wrapup(body)
                 openai_req, orig_sys, mod_sys = _build_openai_request(
                     body,
                     system_template=self.server.system_template,
@@ -1976,6 +2027,18 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 )
                 route = new_route
                 compact_rewritten = True
+
+            # Wrap-up reminder on the Anthropic-native (byte-for-byte) path:
+            # inject into the JSON body and re-serialize only for /v1/messages
+            # when the flush window is active; every other route/body forwards
+            # untouched.
+            if route == "/v1/messages" and getattr(self.server, "wrapup_message", ""):
+                try:
+                    tbody = json.loads(raw_body)
+                    if self._maybe_inject_wrapup(tbody):
+                        raw_body = json.dumps(tbody, ensure_ascii=False).encode("utf-8")
+                except (ValueError, TypeError):
+                    pass
 
             # Everything else: transparent byte-for-byte forward.
             self._forward_transparent(
@@ -2658,6 +2721,9 @@ def run_proxy(config: dict[str, Any]) -> None:
 
     raw_max_requests = config.get("max_requests", -1)
     max_requests = -1 if raw_max_requests in (None, "") else int(raw_max_requests)
+    raw_wrapup_at = config.get("wrapup_at", -1)
+    wrapup_at = -1 if raw_wrapup_at in (None, "") else int(raw_wrapup_at)
+    wrapup_message = str(config.get("wrapup_message") or "")
     max_input_tokens = _optional_positive_int(config.get("max_input_tokens"))
     max_output_tokens = _optional_positive_int(config.get("max_output_tokens"))
     max_cost = _optional_positive_float(config.get("max_cost"))
@@ -2685,6 +2751,8 @@ def run_proxy(config: dict[str, Any]) -> None:
     httpd.max_output_tokens = max_output_tokens
     httpd.max_output_tokens_cap = max_output_tokens_cap
     httpd.max_requests = max_requests
+    httpd.wrapup_at = wrapup_at
+    httpd.wrapup_message = wrapup_message
     httpd.needs_translation = needs_translation
     httpd.recorder = recorder
     httpd.request_timeout = request_timeout

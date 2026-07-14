@@ -22,8 +22,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from cage.contracts.sample_keys import SAMPLE_MAX_ROUNDS_KEY
-from cage.contracts.execution import resolve_max_rounds
+from cage.contracts.sample_keys import (
+    SAMPLE_MAX_ROUNDS_KEY,
+    SAMPLE_WRAPUP_BEFORE_KEY,
+    SAMPLE_WRAPUP_MESSAGE_KEY,
+)
+from cage.contracts.execution import resolve_max_rounds, resolve_wrapup
 from cage.agents.base import AgentInstance
 from cage.artifacts.canonical_marks import (
     _mark_canonical_proxy_log_artifact,
@@ -172,6 +176,30 @@ def _effective_trial_max_rounds(
         getattr(agent, "max_rounds", -1),
         getattr(getattr(config, "execution", None), "max_rounds", -1),
         sample.get(SAMPLE_MAX_ROUNDS_KEY) if isinstance(sample, dict) else None,
+    )
+
+
+def _effective_trial_wrapup(
+    sample: dict[str, Any],
+    config: Any,
+    effective_max_rounds: int,
+) -> tuple[int, str]:
+    """Resolve the graceful pre-cap wrap-up for one trial → ``(wrapup_at, msg)``.
+
+    ``wrapup_before`` (runtime override or benchmark sample default) is an offset
+    from the resolved round cap, so the flush window tracks whatever
+    ``max_rounds`` ended up being. Disabled (``(-1, "")``) when the cap is
+    unbounded or the benchmark declares no wrap-up message.
+    """
+
+    execution = getattr(config, "execution", None)
+    bag = sample if isinstance(sample, dict) else {}
+    return resolve_wrapup(
+        effective_max_rounds,
+        getattr(execution, "wrapup_before", None),
+        getattr(execution, "wrapup_message", None),
+        bag.get(SAMPLE_WRAPUP_BEFORE_KEY),
+        bag.get(SAMPLE_WRAPUP_MESSAGE_KEY),
     )
 
 def _has_proxy_artifact_mount(container: Container) -> bool:
@@ -1262,12 +1290,15 @@ def execute_trial(
             proxy_logs_mounted = _has_proxy_artifact_mount(container)
             # Subscription-mode fallback: when the model declares an
             # ``auth_source`` (OAuth credentials on the host) and no
-            # explicit ``base_url`` is given, forward to anthropic.com so
-            # the CLI's OAuth Bearer header reaches the real subscription
-            # backend. ``upstream_api_key`` is left empty — the client
-            # already supplies Authorization and ``container_proxy.py``
-            # passes it through verbatim.
+            # explicit ``base_url`` is given, forward to the agent's real
+            # subscription backend (Anthropic for Claude Code, the ChatGPT
+            # Codex backend for Codex — see
+            # ``AgentType.subscription_upstream_base_url``) so the CLI's OAuth
+            # Bearer header reaches it. ``upstream_api_key`` is left empty —
+            # the client already supplies Authorization and
+            # ``container_proxy.py`` passes it through verbatim.
             _sub_mode = bool(model.auth_source) and not model.base_url
+            _sub_upstream = agent.agent_type.subscription_upstream_base_url
             # RL mode: tag every upstream LLM call with the trial's join key so an
             # external trainer can group one trajectory's calls. Rides the
             # existing ``extra_headers`` channel (host writes it into the proxy
@@ -1279,9 +1310,13 @@ def execute_trial(
                 from cage.rl.reward_sink import rl_trial_id
 
                 _extra_headers["X-Trial-Id"] = rl_trial_id(run_id, trial_id)
+            _trial_max_requests = _effective_trial_max_rounds(agent, trial.sample, run)
+            _trial_wrapup_at, _trial_wrapup_message = _effective_trial_wrapup(
+                trial.sample, run, _trial_max_requests
+            )
             proxy_config = ProxyInstanceConfig(
                 upstream_base_url=(
-                    "https://api.anthropic.com" if _sub_mode
+                    _sub_upstream if _sub_mode
                     else model.base_url
                 ),
                 upstream_api_key=model.api_key,
@@ -1298,7 +1333,9 @@ def execute_trial(
                     _container_trial_proxy_dir(trial_id) if proxy_logs_mounted else ""
                 ),
                 logs_mounted=proxy_logs_mounted,
-                max_requests=_effective_trial_max_rounds(agent, trial.sample, run),
+                max_requests=_trial_max_requests,
+                wrapup_at=_trial_wrapup_at,
+                wrapup_message=_trial_wrapup_message,
                 max_input_tokens=run.execution.max_input_tokens,
                 max_output_tokens=run.execution.max_output_tokens,
                 max_cost=run.execution.max_cost,

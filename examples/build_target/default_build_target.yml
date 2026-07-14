@@ -1,0 +1,54 @@
+# build_target — agent builds a bootable CAGE target from attachments.
+#
+# Self-declared entry in the `cage benchmark list` registry. The framework
+# discovers this block; it hardcodes no benchmark names.
+registration:
+  id: build_target
+  display_name: Build Target
+  description: Agent builds a bootable CAGE target (Dockerfile + compose) from raw
+    challenge attachments; a validator independently boots it and probes the port.
+  order: 20
+
+project:
+  name: build-target-cage
+
+agents:
+  # Select at run time with `--agent claude_code` (matched by `id`).
+  - id: claude_code
+    kind: claude_code
+    models:
+      - id: deepseek-v4-pro
+        extra_env:
+          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1"
+          DISABLE_INTERLEAVED_THINKING: "1"
+    image: cage/claude-code:pentestenv
+    home: /home/agent/workspace
+    max_concurrent: 1
+    session_args:
+      - --permission-mode
+      - bypassPermissions
+      - --verbose
+
+proxy:
+  enabled: true
+
+# This is an ARTIFACT task: there is no pre-built per-trial victim stack. The
+# "target" is what the agent produces, and it is validated in the scorer (boot
+# check), not launched by the target_server. Same rationale as CyberGym.
+target:
+  enabled: false
+
+output:
+  dashboard_prompt: false
+  dashboard_output: false
+
+eval:
+  benchmark:
+    module: ./benchmark.py
+    class: BuildTarget
+    benchmark_root: ./datasets
+
+runtime:
+  timeout: 2400
+  max_rounds: 40
+  agent_network_mode: bridge

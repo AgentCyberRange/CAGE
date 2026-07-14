@@ -31,6 +31,7 @@ from cage.contracts.execution import (
     max_rounds_config_label,
     normalize_max_rounds_config,
     resolve_max_rounds,
+    resolve_wrapup,
     round_budget_is_unbounded,
     run_lacks_termination_condition,
     sample_max_rounds,
@@ -48,6 +49,8 @@ from cage.contracts.sample_keys import (
     SAMPLE_RUNTIME_ARGS_KEY,
     SAMPLE_TARGET_INFO_KEY,
     SAMPLE_VARIANT_KEY,
+    SAMPLE_WRAPUP_BEFORE_KEY,
+    SAMPLE_WRAPUP_MESSAGE_KEY,
     sample_pass_index,
 )
 from cage.contracts.scoring import Score, extract_numeric_score_value
@@ -78,6 +81,8 @@ __all__ = [
     "SAMPLE_RUNTIME_ARGS_KEY",
     "SAMPLE_TARGET_INFO_KEY",
     "SAMPLE_VARIANT_KEY",
+    "SAMPLE_WRAPUP_BEFORE_KEY",
+    "SAMPLE_WRAPUP_MESSAGE_KEY",
     "Score",
     "Timing",
     "TrialCounts",
@@ -98,6 +103,7 @@ __all__ = [
     "positive_float_or_none",
     "positive_int_or_none",
     "resolve_max_rounds",
+    "resolve_wrapup",
     "sample_max_rounds",
     "sample_pass_index",
 ]

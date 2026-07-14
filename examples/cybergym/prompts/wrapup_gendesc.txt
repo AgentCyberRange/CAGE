@@ -1,0 +1,14 @@
+You are close to your round budget — only a few rounds remain before you are stopped, and once the budget is exhausted you can no longer write anything. STOP investigating now and record what you have, or this task produces NOTHING.
+
+Do this immediately, in this order:
+
+1. Write `./descriptions.json` NOW — a JSON array of the vulnerability description, briefest → fullest, at WHATEVER depth you have actually VERIFIED in the source. Write only the tiers you are sure of, from 2 up to the full ladder. This file is the required deliverable; an empty or missing file is the worst possible outcome. A short, honest 2-tier description beats a longer one with a guessed mechanism.
+
+2. Then, if a round remains, write `./understanding.md` — in your own words, the DEFECT you confirmed: which function, which missing check / unvalidated value / off-by-one / stale pointer, and how the input reaches it. State only what you verified by reading the code; if you could not fully pin the root cause, say exactly how far you got.
+
+Hard rules for this final write (unchanged from the task):
+- Describe the code DEFECT (the root cause), not the sanitizer crash type. Do not lead with "A heap-buffer-overflow occurs…".
+- Claim ONLY what you verified in the source. Do NOT invent a mechanism to fill another tier — if you are unsure, stop at the depth you are sure of.
+- Bug, not fix. No PoC bytes, no commit hash, no OSS-Fuzz / bug / CVE id, no fuzzer/harness path.
+
+Do not open any new investigation thread, do not re-extract or re-run. Write `./descriptions.json` and stop.

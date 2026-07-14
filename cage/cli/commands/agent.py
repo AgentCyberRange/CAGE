@@ -549,8 +549,10 @@ def _custom_agent_build_names(cage_root: Path) -> list[str]:
     help="Build a variant image (e.g. 'openviking' → cage/claude-code:openviking)",
 )
 @click.option(
-    "--version", default="",
-    help="Override agent CLI version (default: use Dockerfile's pinned version)",
+    "--version", default="latest",
+    help="Agent CLI version to bake into the image (default: latest). "
+         "Pin e.g. --version 0.140.0 for a reproducible image; the install "
+         "is the Dockerfile's last layer, so version rebuilds only re-run it.",
 )
 @click.option(
     "--no-cache", is_flag=True,
@@ -663,10 +665,12 @@ def build(agent_name: str, variant: str, version: str, no_cache: bool, build_all
         ]
         if version:
             # Override every known agent CLI version ARG; the Dockerfile
-            # only consumes the one it declares, the rest are ignored.
+            # only consumes the one it declares, the rest are ignored (Docker
+            # warns but does not fail on an unconsumed build-arg).
             for arg in (
                 "CLAUDE_CODE_VERSION",
                 "CODEX_VERSION",
+                "GEMINI_CLI_VERSION",
                 "KIMI_CLI_VERSION",
                 "QWEN_CODE_VERSION",
             ):

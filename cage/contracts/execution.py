@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from cage.contracts.coerce import positive_int_or_none
+
 
 @dataclass(frozen=True)
 class Timing:
@@ -197,3 +199,46 @@ def resolve_max_rounds(
         sample_max = sample_max_rounds(sample_value)
         return sample_max if sample_max is not None else -1
     return -1  # nothing constrained the budget ⇒ unlimited
+
+
+def resolve_wrapup(
+    effective_max_rounds: int,
+    execution_before: Any,
+    execution_message: Any,
+    sample_before: Any,
+    sample_message: Any,
+) -> tuple[int, str]:
+    """Resolve one trial's wrap-up reminder to ``(wrapup_at, message)``.
+
+    The wrap-up is a graceful pre-cap flush: once the agent has completed
+    ``wrapup_at`` rounds, the in-container proxy injects ``message`` into the
+    still-forwarded request (it is NOT a hard stop), giving the agent a window
+    to finalize its deliverable before the hard round cap rejects it.
+
+    The knob is an OFFSET (``wrapup_before`` = rounds before the cap), not an
+    absolute round, so it tracks whatever ``max_rounds`` resolves to and never
+    fires prematurely when the cap is large. Precedence mirrors
+    :func:`resolve_max_rounds`: an explicit runtime (yaml/CLI) value wins;
+    otherwise the benchmark sample default applies.
+
+    Returns ``(-1, "")`` — wrap-up disabled — when there is no finite cap
+    (``effective_max_rounds <= 0``), the offset is unset/non-positive, the
+    offset is not strictly smaller than the cap, or the message is empty.
+    """
+
+    before = positive_int_or_none(execution_before)
+    if before is None:
+        before = positive_int_or_none(sample_before)
+    message = ""
+    for candidate in (execution_message, sample_message):
+        if isinstance(candidate, str) and candidate.strip():
+            message = candidate
+            break
+    if (
+        effective_max_rounds <= 0
+        or before is None
+        or before >= effective_max_rounds
+        or not message
+    ):
+        return (-1, "")
+    return (effective_max_rounds - before, message)

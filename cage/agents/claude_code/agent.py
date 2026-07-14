@@ -194,6 +194,11 @@ class ClaudeCodeAgent(AgentType):
     def version_command(self) -> str:
         return "claude --version 2>/dev/null || echo unknown"
 
+    @property
+    def subscription_upstream_base_url(self) -> str:
+        """Anthropic API — reached with the OAuth bearer in subscription mode."""
+        return "https://api.anthropic.com"
+
     def validate_auth(self, model: ModelConfig) -> None:
         """Verify subscription credentials exist before any trial runs.
 

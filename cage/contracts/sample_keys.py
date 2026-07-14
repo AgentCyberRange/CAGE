@@ -35,6 +35,18 @@ SAMPLE_VARIANT_KEY = "variant"
 #: in :func:`cage.contracts.execution.resolve_max_rounds`.
 SAMPLE_MAX_ROUNDS_KEY = "max_rounds"
 
+#: Benchmark-declared wrap-up window: how many rounds before the hard round cap
+#: the in-container proxy should start injecting the wrap-up reminder (a graceful
+#: pre-cap flush, so the agent finalizes its deliverable instead of being hard-
+#: stopped). Offset, not absolute, so it tracks whatever ``max_rounds`` resolves
+#: to. Lowest precedence in :func:`cage.contracts.execution.resolve_wrapup`.
+SAMPLE_WRAPUP_BEFORE_KEY = "wrapup_before"
+
+#: Benchmark-declared text of the wrap-up reminder. Benchmark-specific content
+#: (what "finalize your deliverable" means for this domain); the framework only
+#: forwards it verbatim into the request. Empty ⇒ wrap-up disabled.
+SAMPLE_WRAPUP_MESSAGE_KEY = "wrapup_message"
+
 #: Benchmark-declared per-sample target runtime overrides, merged into the
 #: target launch request by Layer-1 provisioning.
 SAMPLE_RUNTIME_ARGS_KEY = "runtime_args"

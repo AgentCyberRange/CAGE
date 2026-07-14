@@ -36,18 +36,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # system 3.8. Use `python3 -m pip` so it targets that interpreter.
 RUN python3 -m pip install --no-cache-dir httpx h2
 
-# Node.js 20 + Claude Code CLI (mirrors docker/claude_code.Dockerfile).
+# Node.js 20 (Claude Code CLI is installed last — see the tail of this file).
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
-ARG CLAUDE_CODE_VERSION=2.1.150
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 COPY cage/proxy/sidecar.py /opt/cage-proxy/container_proxy.py
 
 RUN useradd -m -s /bin/bash agent \
     && mkdir -p /home/agent/workspace \
     && chown -R agent:agent /home/agent
+
+# Pre-install Claude Code CLI. Kept as the LAST build layer so `cage agent
+# build --version <v>` (or a --build-arg) only re-runs this step — everything
+# above stays cached. Runs before `ENV HOME` so npm's cache lands in /root,
+# not the agent's home. Default `latest`; pin a version for a reproducible image.
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 ENV HOME=/home/agent
 CMD ["sleep", "infinity"]

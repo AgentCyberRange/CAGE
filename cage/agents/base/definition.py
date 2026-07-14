@@ -125,6 +125,22 @@ class AgentType(ABC):
 
         return None
 
+    @property
+    def subscription_upstream_base_url(self) -> str:
+        """Real provider API the proxy forwards to in subscription/OAuth mode.
+
+        When a model declares an ``auth_source`` (host OAuth credentials) and
+        no explicit ``base_url``, Cage runs the agent in subscription mode: the
+        CLI authenticates with its own OAuth bearer, and the in-container proxy
+        forwards that request — bearer passed through verbatim — to the
+        provider's real backend. That backend is agent-specific (Anthropic for
+        Claude Code, the ChatGPT Codex backend for Codex), so each agent that
+        supports OAuth names its upstream here. Empty ⇒ the agent has no
+        subscription backend (OAuth mode unsupported).
+        """
+
+        return ""
+
     def host_run_services(
         self,
         model: ModelConfig,

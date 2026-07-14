@@ -34,6 +34,7 @@ agent × variant, never by benchmark (a benchmark only selects them).
 ```
 cage agent build --agent <name>                 # base    -> agent.default_image
 cage agent build --agent <name> --variant <v>   # docker/<name>/<v>.Dockerfile -> cage/<agent>:<v>
+cage agent build --agent <name> --version 0.140.0   # bake a specific CLI version
 cage agent build --all                          # base + every docker/<name>/<variant>.Dockerfile
 ```
 
@@ -41,6 +42,16 @@ The variant path is resolved by convention (`docker/<name>/<variant>.Dockerfile`
 see `cage/cli/commands/agent.py`), so a variant only needs a correctly-placed
 file. The bare `docker/<name>/Dockerfile` is the base and is never built as a
 variant.
+
+**Version selection.** `--version` (default `latest`) picks which agent-CLI
+version gets baked in; it maps to the Dockerfile's `ARG <AGENT>_VERSION`. Every
+agent Dockerfile installs its CLI as the **last** build layer, on purpose:
+changing `--version` re-runs only that one step — apt, Node, the proxy, and the
+agent user all stay cached, so a version rebuild is seconds, not a full rebuild.
+Leave it at `latest` for the newest CLI, or pin (`--version 0.140.0`) for a
+reproducible image. To keep several versions side by side, give each its own tag
+(`docker build -f … --build-arg CODEX_VERSION=0.140.0 -t cage/codex:0.140.0 .`)
+and point the agent's image at the tag you want.
 
 **Custom agents** (a manifest `cage/agents/custom/<name>/agent.yml`) run their own
 `build.script`, which references their Dockerfiles directly:

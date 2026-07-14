@@ -162,6 +162,16 @@ class ExecutionConfig:
     # benchmark sample default) | 0 (no rounds) | N. Resolved by
     # resolve_max_rounds(); an unlimited budget needs another stop condition.
     max_rounds: int | str | None = "unlimited"
+    # Graceful wrap-up before the hard round cap. ``wrapup_before`` = how many
+    # rounds before ``max_rounds`` the in-container proxy starts injecting the
+    # wrap-up reminder, so the agent finalizes its deliverable instead of being
+    # hard-stopped (429) at the cap. Offset (not absolute) so it tracks whatever
+    # ``max_rounds`` resolves to. None/<=0, or a message-less benchmark, disables
+    # it. The reminder text usually comes from the benchmark sample; set
+    # ``wrapup_message`` here only to override per-run. Resolved by
+    # resolve_wrapup(); needs a finite ``max_rounds`` to have anything to offset.
+    wrapup_before: int | None = None
+    wrapup_message: str | None = None
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     max_cost: float | None = None

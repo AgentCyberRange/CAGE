@@ -74,6 +74,48 @@ cage model set claude-opus \
 
 Full model-registry details are in [models.md](docs/models.md).
 
+#### 2.1 Set the reasoning effort
+
+Reasoning effort (and any other inference knob) belongs to the **installed agent
+CLI**, not to CAGE — the CLI decides what it accepts and what the levels mean.
+CAGE's job is only to hand your choice to that CLI, and it gives you exactly two
+channels for doing so:
+
+- **`session_args`** (in `project.yml`) — appended verbatim to the agent's
+  launch command. Use it for controls the CLI reads as command-line flags. For
+  example, Codex takes reasoning effort as a `-c` config override:
+
+  ```yaml
+  agents:
+    - id: codex
+      kind: codex
+      models: [gpt-5.5]        # or codex-chatgpt for ChatGPT/OAuth
+      session_args:
+        - -c
+        - model_reasoning_effort=high
+  ```
+
+- **`agent_model_names`** (in `config/models.yml`) — the model string a specific
+  agent receives. Use it for CLIs that select effort through the model name. For
+  example, Claude Code takes it as a suffix (and only Claude Code sees it):
+
+  ```yaml
+  # config/models.yml
+  claude-opus-sub:
+    provider: anthropic
+    model: claude-opus-4-7
+    agent_model_names:
+      claude_code: claude-opus-4-7[xhigh]
+    auth_source: ${CAGE_CLAUDE_AUTH_SOURCE}
+  ```
+
+Which flags or model-name forms are valid — and what effort levels exist — is
+defined by each agent, so consult that agent's own documentation (Codex, Claude
+Code, …); CAGE only forwards what you put in these two fields. The fields
+themselves are documented in the
+[project.yml reference](docs/reference/project-yml.md) and
+[models.md](docs/models.md).
+
 ### 3. Prepare Targets
 
 CAGE ships two AgentPentestBench datasets as git submodules. The submodules

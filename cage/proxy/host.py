@@ -133,6 +133,13 @@ class ProxyInstanceConfig:
     container_log_dir: str = ""
     logs_mounted: bool = False
     max_requests: int = -1  # -1 = unlimited; 0 rejects before the first request
+    # Graceful pre-cap wrap-up. Once ``budgeted_round_count() >= wrapup_at``
+    # (an ABSOLUTE round; the offset→absolute math happens in the orchestrator
+    # where the cap is known), the proxy injects ``wrapup_message`` into the
+    # still-forwarded request so the agent can finalize before ``max_requests``
+    # hard-rejects it. -1 / empty message ⇒ disabled.
+    wrapup_at: int = -1
+    wrapup_message: str = ""
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     max_cost: float | None = None
@@ -374,6 +381,8 @@ def start_container_proxy(
         "upstream_extra_body": dict(config.upstream_extra_body or {}),
         "trial_id": str(config.trial_id),
         "max_requests": config.max_requests,
+        "wrapup_at": int(config.wrapup_at),
+        "wrapup_message": str(config.wrapup_message),
         "max_input_tokens": config.max_input_tokens,
         "max_output_tokens": config.max_output_tokens,
         "max_cost": config.max_cost,

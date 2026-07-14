@@ -24,10 +24,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-install Codex CLI
-ARG CODEX_VERSION=0.133.0
-RUN npm install -g @openai/codex@${CODEX_VERSION}
-
 # Install cage proxy (standalone, no cage package dependency)
 COPY cage/proxy/sidecar.py /opt/cage-proxy/container_proxy.py
 
@@ -35,6 +31,13 @@ COPY cage/proxy/sidecar.py /opt/cage-proxy/container_proxy.py
 RUN useradd -m -s /bin/bash agent \
     && mkdir -p /home/agent/workspace \
     && chown -R agent:agent /home/agent
+
+# Pre-install Codex CLI. Kept as the LAST build layer so `cage agent build
+# --version <v>` (or a --build-arg) only re-runs this step — everything above
+# stays cached. Runs before `ENV HOME` so npm's cache lands in /root, not the
+# agent's home. Default `latest`; pin a version for a reproducible image.
+ARG CODEX_VERSION=latest
+RUN npm install -g @openai/codex@${CODEX_VERSION}
 
 ENV HOME=/home/agent
 

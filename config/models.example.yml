@@ -40,10 +40,12 @@ models:
   #               INSTEAD of api_key only when you want to spread load over
   #               multiple accounts. (Internally: pool = api_keys if set, else
   #               [api_key].)
-  #    auth_source  ONLY for subscription / OAuth agents — Claude Code logged in
-  #               with a Max/Pro account instead of an API key. Points at a host
-  #               directory holding `.credentials.json` / `.claude.json`, which
-  #               CAGE copies into the agent container. In this mode base_url and
+  #    auth_source  ONLY for subscription / OAuth agents logged in with an
+  #               account instead of an API key: Claude Code (Max/Pro) or Codex
+  #               ("Sign in with ChatGPT"). Points at a host directory holding
+  #               the agent's OAuth credential file (`.credentials.json` for
+  #               Claude Code, `.codex/auth.json` for Codex), which CAGE
+  #               bind-mounts into the agent container. In this mode base_url and
   #               api_key are left empty. Almost no endpoint needs this — leave
   #               it out entirely unless you actually run subscription mode.
   #
@@ -136,15 +138,26 @@ models:
     api_key: ${ANTHROPIC_API_KEY}
     timeout: 3600
 
-  # --- Anthropic subscription / OAuth — the ONLY user of auth_source ----
-  #     No base_url / api_key: Claude Code logs in with a Max/Pro account and
-  #     CAGE copies the host credentials (dir below) into the container.
+  # --- Subscription / OAuth (auth_source) — Claude Code & Codex ---------
+  #     No base_url / api_key: the agent logs in with a subscription account
+  #     and CAGE bind-mounts the host credentials into the container, keeping
+  #     the on-disk OAuth token fresh via a host-side refresher for the run.
   claude-opus-sub:
     provider: anthropic
     model: claude-opus-4-7
     agent_model_names:
       claude_code: claude-opus-4-7[1m]   # decorated launch name (e.g. [1m] = 1M context)
     auth_source: ${CAGE_CLAUDE_AUTH_SOURCE}   # host dir with .credentials.json
+
+  # --- Codex "Sign in with ChatGPT" (OAuth). Run `codex login` on the host
+  #     first so ~/.codex/auth.json holds the ChatGPT OAuth tokens; point
+  #     auth_source at that dir (or the file). No base_url / api_key — the proxy
+  #     forwards the OAuth Bearer to the ChatGPT Codex backend. Use with
+  #     `--agent codex`.
+  codex-chatgpt:
+    provider: openai
+    model: gpt-5-codex
+    auth_source: ${CAGE_CODEX_AUTH_SOURCE}   # host dir with .codex/auth.json (e.g. ~/.codex)
 
   # --- Anthropic-compatible 3rd party (custom base_url + agent name) ----
   deepseek-v4-pro:
